@@ -9,7 +9,6 @@ import { Input } from "@ui/input";
 import { Checkbox } from "@ui/checkbox";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@ui/card";
 import { Separator } from "@ui/separator";
-import { ThemeToggle } from "@/components/ThemeToggle";
 import { useRouter } from "next/navigation";
 import { useScrapeStore } from "@/hooks/useScrapeStore";
 import { useForm } from "react-hook-form";
@@ -76,7 +75,6 @@ export default function Home() {
     <div className="max-w-3xl mx-auto p-6">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-semibold">LinkedIn Scraper</h1>
-        <ThemeToggle />
       </div>
       <Form {...form}>
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">

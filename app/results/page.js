@@ -1,9 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Button } from "@ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@ui/table";
-import { ThemeToggle } from "@/components/ThemeToggle";
 import { useScrapeStore } from "@/hooks/useScrapeStore";
 
 export default function ResultsPage() {
@@ -21,10 +19,6 @@ export default function ResultsPage() {
     <div className="max-w-6xl mx-auto p-6">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-semibold">Results</h1>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={() => router.back()}>Back</Button>
-          <ThemeToggle />
-        </div>
       </div>
 
       {results.length === 0 ? (
