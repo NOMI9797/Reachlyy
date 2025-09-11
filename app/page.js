@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@ui/button";
 import { Textarea } from "@ui/textarea";
 import { Label } from "@ui/label";
@@ -9,6 +9,7 @@ import { Input } from "@ui/input";
 import { Checkbox } from "@ui/checkbox";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@ui/card";
 import { Separator } from "@ui/separator";
+import { Progress } from "@ui/progress";
 import { useRouter } from "next/navigation";
 import { useScrapeStore } from "@/hooks/useScrapeStore";
 import { useForm } from "react-hook-form";
@@ -21,6 +22,7 @@ export default function Home() {
   const [error, setError] = useState("");
   const [results, setResults] = useState([]);
   const setItems = useScrapeStore((s) => s.setItems);
+  const { progress, status, isStreaming, updateProgress, resetProgress, setIsStreaming } = useScrapeStore();
 
   const form = useForm({
     defaultValues: {
@@ -35,6 +37,9 @@ export default function Home() {
     setError("");
     setResults([]);
     setIsLoading(true);
+    resetProgress();
+    setIsStreaming(true);
+    
     try {
       const urls = values.urlsText
         .split(/\n|,/)
@@ -43,9 +48,11 @@ export default function Home() {
       if (urls.length === 0) {
         setError("Please enter at least one URL.");
         setIsLoading(false);
+        setIsStreaming(false);
         return;
       }
 
+      // Use streaming for real-time progress
       const res = await fetch("/api/scrape", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -54,20 +61,59 @@ export default function Home() {
           limitPerSource: Number(values.limitPerSource) || 2,
           deepScrape: !!values.deepScrape,
           rawData: !!values.rawData,
+          streamProgress: true,
         }),
       });
-      const data = await res.json();
+
       if (!res.ok) {
-        throw new Error(data?.error || "Request failed");
+        const errorData = await res.json();
+        throw new Error(errorData?.error || "Request failed");
       }
-      const items = Array.isArray(data.items) ? data.items : [];
-      setResults(items);
-      setItems(items);
-      router.push("/results");
+
+      // Handle streaming response
+      const reader = res.body?.getReader();
+      const decoder = new TextDecoder();
+
+      if (!reader) {
+        throw new Error("No response body");
+      }
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value);
+        const lines = chunk.split('\n');
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              updateProgress(data.progress, data.status);
+              
+              if (data.completed) {
+                if (data.error) {
+                  throw new Error(data.error);
+                }
+                if (data.items) {
+                  const items = Array.isArray(data.items) ? data.items : [];
+                  setResults(items);
+                  setItems(items);
+                  router.push("/results");
+                }
+                break;
+              }
+            } catch (parseError) {
+              console.error('Error parsing SSE data:', parseError);
+            }
+          }
+        }
+      }
     } catch (err) {
       setError(err.message || "Unknown error");
     } finally {
       setIsLoading(false);
+      setIsStreaming(false);
     }
   };
 
@@ -166,9 +212,23 @@ export default function Home() {
           </CardContent>
         </Card>
 
-        <Button type="submit" disabled={isLoading} className="w-full">
-          {isLoading ? "Scraping..." : "Run Scraper"}
-        </Button>
+        {!isStreaming ? (
+          <Button type="submit" disabled={isLoading} className="w-full">
+            {isLoading ? "Scraping..." : "Run Scraper"}
+          </Button>
+        ) : (
+          <div className="space-y-4">
+            <div className="flex justify-between text-sm">
+              <span className="text-muted-foreground">Progress</span>
+              <span className="font-medium">{progress}%</span>
+            </div>
+            <Progress value={progress} className="w-full" />
+            <p className="text-sm text-muted-foreground text-center">{status}</p>
+            <div className="flex justify-center">
+              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
+            </div>
+          </div>
+        )}
       </form>
       </Form>
 
