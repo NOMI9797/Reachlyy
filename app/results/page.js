@@ -151,68 +151,107 @@ export default function ResultsPage() {
     setIsTextModalOpen(true);
   };
 
-  // Filter and sort results
-  const filteredAndSortedResults = results
-    .filter((item) => {
-      const source = item?.resharedPost || item;
-      const authorName = source?.authorName || (source?.author?.firstName && source?.author?.lastName ? `${source.author.firstName} ${source.author.lastName}` : "");
-      const text = source?.text || "";
-      const type = source?.type || source?.contentType || "";
-      
-      // Search filter
-      const matchesSearch = searchTerm === "" || 
-        authorName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        text.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        type.toLowerCase().includes(searchTerm.toLowerCase());
-      
-      // Type filter
-      const matchesType = filterType === "all" || type.toLowerCase() === filterType.toLowerCase();
-      
-      return matchesSearch && matchesType;
-    })
-    .sort((a, b) => {
-      if (!sortField) return 0;
-      
-      const sourceA = a?.resharedPost || a;
-      const sourceB = b?.resharedPost || b;
-      
-      let valueA, valueB;
-      
-      switch (sortField) {
-        case "author":
-          valueA = sourceA?.authorName || (sourceA?.author?.firstName && sourceA?.author?.lastName ? `${sourceA.author.firstName} ${sourceA.author.lastName}` : "");
-          valueB = sourceB?.authorName || (sourceB?.author?.firstName && sourceB?.author?.lastName ? `${sourceB.author.firstName} ${sourceB.author.lastName}` : "");
-          break;
-        case "type":
-          valueA = sourceA?.type || sourceA?.contentType || "";
-          valueB = sourceB?.type || sourceB?.contentType || "";
-          break;
-        case "text":
-          valueA = sourceA?.text || "";
-          valueB = sourceB?.text || "";
-          break;
-        case "likes":
-          valueA = sourceA?.numLikes || 0;
-          valueB = sourceB?.numLikes || 0;
-          break;
-        case "date":
-          valueA = new Date(sourceA?.postedAtISO || 0);
-          valueB = new Date(sourceB?.postedAtISO || 0);
-          break;
-        default:
-          return 0;
-      }
-      
-      if (valueA < valueB) return sortDirection === "asc" ? -1 : 1;
-      if (valueA > valueB) return sortDirection === "asc" ? 1 : -1;
-      return 0;
-    });
+  // Group results by source URL
+  const groupedResults = results.reduce((groups, item) => {
+    const sourceUrl = item?.sourceUrl || 'Unknown Source';
+    if (!groups[sourceUrl]) {
+      groups[sourceUrl] = [];
+    }
+    groups[sourceUrl].push(item);
+    return groups;
+  }, {});
 
-  // Pagination
-  const totalPages = Math.ceil(filteredAndSortedResults.length / itemsPerPage);
+  // Get source URLs for display
+  const sourceUrls = Object.keys(groupedResults);
+
+  // Filter and sort function for individual groups
+  const filterAndSortGroup = (groupItems) => {
+    return groupItems
+      .filter((item) => {
+        const source = item?.resharedPost || item;
+        const authorName = source?.authorName || (source?.author?.firstName && source?.author?.lastName ? `${source.author.firstName} ${source.author.lastName}` : "");
+        const text = source?.text || "";
+        const type = source?.type || source?.contentType || "";
+        
+        // Search filter
+        const matchesSearch = searchTerm === "" || 
+          authorName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          text.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          type.toLowerCase().includes(searchTerm.toLowerCase());
+        
+        // Type filter
+        const matchesType = filterType === "all" || type.toLowerCase() === filterType.toLowerCase();
+        
+        return matchesSearch && matchesType;
+      })
+      .sort((a, b) => {
+        if (!sortField) return 0;
+        
+        const sourceA = a?.resharedPost || a;
+        const sourceB = b?.resharedPost || b;
+        
+        let valueA, valueB;
+        
+        switch (sortField) {
+          case "author":
+            valueA = sourceA?.authorName || (sourceA?.author?.firstName && sourceA?.author?.lastName ? `${sourceA.author.firstName} ${sourceA.author.lastName}` : "");
+            valueB = sourceB?.authorName || (sourceB?.author?.firstName && sourceB?.author?.lastName ? `${sourceB.author.firstName} ${sourceB.author.lastName}` : "");
+            break;
+          case "type":
+            valueA = sourceA?.type || sourceA?.contentType || "";
+            valueB = sourceB?.type || sourceB?.contentType || "";
+            break;
+          case "text":
+            valueA = sourceA?.text || "";
+            valueB = sourceB?.text || "";
+            break;
+          case "likes":
+            valueA = sourceA?.numLikes || 0;
+            valueB = sourceB?.numLikes || 0;
+            break;
+          case "date":
+            valueA = new Date(sourceA?.postedAtISO || 0);
+            valueB = new Date(sourceB?.postedAtISO || 0);
+            break;
+          default:
+            return 0;
+        }
+        
+        if (valueA < valueB) return sortDirection === "asc" ? -1 : 1;
+        if (valueA > valueB) return sortDirection === "asc" ? 1 : -1;
+        return 0;
+      });
+  };
+
+  // Apply filtering and sorting to all groups
+  const filteredGroupedResults = {};
+  let totalFilteredItems = 0;
+  
+  sourceUrls.forEach(sourceUrl => {
+    const filteredGroup = filterAndSortGroup(groupedResults[sourceUrl]);
+    if (filteredGroup.length > 0) {
+      filteredGroupedResults[sourceUrl] = filteredGroup;
+      totalFilteredItems += filteredGroup.length;
+    }
+  });
+
+  // Pagination for grouped results
+  const totalPages = Math.ceil(totalFilteredItems / itemsPerPage);
   const startIndex = (currentPage - 1) * itemsPerPage;
   const endIndex = startIndex + itemsPerPage;
-  const paginatedResults = filteredAndSortedResults.slice(startIndex, endIndex);
+
+  // Get paginated results from grouped data
+  const getPaginatedGroupedResults = () => {
+    const allItems = [];
+    Object.entries(filteredGroupedResults).forEach(([sourceUrl, items]) => {
+      items.forEach(item => {
+        allItems.push({ ...item, sourceUrl });
+      });
+    });
+    return allItems.slice(startIndex, endIndex);
+  };
+
+  const paginatedResults = getPaginatedGroupedResults();
 
   // Get unique types for filter
   const uniqueTypes = [...new Set(results.map(item => {
@@ -313,7 +352,7 @@ export default function ResultsPage() {
               Back
             </Button>
             <h1 className="text-2xl font-semibold">
-              Results ({filteredAndSortedResults.length} of {results.length})
+              Results ({totalFilteredItems} of {results.length})
             </h1>
           </div>
           {results.length > 0 && (
@@ -356,6 +395,7 @@ export default function ResultsPage() {
             </div>
           )}
         </div>
+
 
         {/* Search and Filters */}
         {results.length > 0 && (
@@ -454,143 +494,176 @@ export default function ResultsPage() {
           </Button>
         </div>
       ) : (
-        <div className="overflow-auto border rounded">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-[50px]">
-                  <Checkbox
-                    checked={paginatedResults.length > 0 && selectedItems.length === paginatedResults.length}
-                    onCheckedChange={handleSelectAll}
-                  />
-                </TableHead>
-                <TableHead 
-                  className="whitespace-nowrap w-[150px] cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800"
-                  onClick={() => handleSort('author')}
-                >
-                  <div className="flex items-center gap-1">
-                    Author
-                    {sortField === 'author' && (
-                      sortDirection === 'asc' ? <SortAsc className="h-4 w-4" /> : <SortDesc className="h-4 w-4" />
-                    )}
+        <div className="space-y-6">
+          {Object.entries(filteredGroupedResults).map(([sourceUrl, groupItems]) => (
+            <div key={sourceUrl} className="border rounded-lg">
+              {/* Source Header */}
+              <div className="bg-gray-50 dark:bg-gray-800 px-4 py-3 border-b">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
+                    <h3 className="font-semibold text-sm truncate max-w-md" title={sourceUrl}>
+                      {sourceUrl.includes('linkedin.com/company/') ? 
+                        sourceUrl.split('/company/')[1]?.split('/')[0]?.replace(/-/g, ' ') || 'Company' :
+                       sourceUrl.includes('linkedin.com/in/') ? 
+                        sourceUrl.split('/in/')[1]?.split('/')[0]?.replace(/-/g, ' ') || 'Profile' :
+                        sourceUrl.split('/').pop() || 'Source'}
+                    </h3>
                   </div>
-                </TableHead>
-                <TableHead className="whitespace-nowrap w-[200px]">Headline</TableHead>
-                <TableHead 
-                  className="whitespace-nowrap w-[100px] cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800"
-                  onClick={() => handleSort('type')}
-                >
-                  <div className="flex items-center gap-1">
-                    Type
-                    {sortField === 'type' && (
-                      sortDirection === 'asc' ? <SortAsc className="h-4 w-4" /> : <SortDesc className="h-4 w-4" />
-                    )}
-                  </div>
-                </TableHead>
-                <TableHead className="whitespace-nowrap w-[300px]">Text</TableHead>
-                <TableHead className="whitespace-nowrap w-[200px]">URL</TableHead>
-                <TableHead 
-                  className="whitespace-nowrap w-[80px] cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800"
-                  onClick={() => handleSort('likes')}
-                >
-                  <div className="flex items-center gap-1">
-                    Likes
-                    {sortField === 'likes' && (
-                      sortDirection === 'asc' ? <SortAsc className="h-4 w-4" /> : <SortDesc className="h-4 w-4" />
-                    )}
-                  </div>
-                </TableHead>
-                <TableHead className="whitespace-nowrap w-[80px]">Image</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {paginatedResults.map((item, idx) => {
-                const source = item?.resharedPost || item;
-                const authorName = source?.authorName || (source?.author?.firstName && source?.author?.lastName ? `${source.author.firstName} ${source.author.lastName}` : "—");
-                const authorHeadline = source?.authorHeadline || source?.author?.occupation || "—";
-                const type = source?.type || source?.contentType || "—";
-                const text = (source?.text || "").toString().slice(0, 180);
-                const url = source?.url || source?.shareUrl || source?.postUrl || "";
-                const image = (Array.isArray(source?.images) && source.images[0]) || source?.thumbnail || source?.authorProfilePicture || "";
-                const likes = source?.numLikes || 0;
-                const isSelected = selectedItems.includes(startIndex + idx);
-                
-                return (
-                  <TableRow key={startIndex + idx} className={isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""}>
-                    <TableCell className="w-[50px]">
-                      <Checkbox
-                        checked={isSelected}
-                        onCheckedChange={(checked) => handleSelectItem(idx, checked)}
-                      />
-                    </TableCell>
-                    <TableCell className="whitespace-nowrap align-top w-[150px]">
-                      <div className="text-sm font-medium truncate" title={authorName || "—"}>
-                        {authorName || "—"}
-                      </div>
-                    </TableCell>
-                    <TableCell className="align-top w-[200px]">
-                      <div className="text-sm line-clamp-2" title={authorHeadline || "—"}>
-                        {authorHeadline || "—"}
-                      </div>
-                    </TableCell>
-                    <TableCell className="whitespace-nowrap align-top w-[100px]">
-                      <Badge variant="secondary" className="text-xs">
-                        {type}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="align-top w-[300px]">
-                      <div className="space-y-2">
-                        <div className="text-sm line-clamp-3" title={text || "—"}>
-                          {text || "—"}
+                </div>
+              </div>
+
+              {/* Sub-table */}
+              <div className="overflow-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-[50px]">
+                        <Checkbox
+                          checked={groupItems.length > 0 && groupItems.every((_, idx) => 
+                            selectedItems.includes(startIndex + idx)
+                          )}
+                          onCheckedChange={(checked) => {
+                            if (checked) {
+                              const newSelections = groupItems.map((_, idx) => startIndex + idx);
+                              setSelectedItems([...selectedItems, ...newSelections]);
+                            } else {
+                              const groupIndices = groupItems.map((_, idx) => startIndex + idx);
+                              setSelectedItems(selectedItems.filter(i => !groupIndices.includes(i)));
+                            }
+                          }}
+                        />
+                      </TableHead>
+                      <TableHead 
+                        className="whitespace-nowrap w-[150px] cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800"
+                        onClick={() => handleSort('author')}
+                      >
+                        <div className="flex items-center gap-1">
+                          Author
+                          {sortField === 'author' && (
+                            sortDirection === 'asc' ? <SortAsc className="h-4 w-4" /> : <SortDesc className="h-4 w-4" />
+                          )}
                         </div>
-                        {text && text.length > 100 && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => openTextViewer(source)}
-                            className="text-xs h-7 px-2"
-                          >
-                            <Eye className="h-3 w-3 mr-1" />
-                            View Full Text
-                          </Button>
-                        )}
-                      </div>
-                    </TableCell>
-                    <TableCell className="align-top w-[200px]">
-                      {url ? (
-                        <a 
-                          href={url} 
-                          target="_blank" 
-                          rel="noreferrer" 
-                          className="text-blue-600 hover:text-blue-800 text-xs break-all line-clamp-2 block"
-                          title={url}
-                        >
-                          {url.length > 40 ? `${url.substring(0, 40)}...` : url}
-                        </a>
-                      ) : (
-                        "—"
-                      )}
-                    </TableCell>
-                    <TableCell className="align-top w-[80px] text-center">
-                      {likes > 0 ? (
-                        <span className="text-sm font-medium">👍 {likes}</span>
-                      ) : (
-                        "—"
-                      )}
-                    </TableCell>
-                    <TableCell className="align-top w-[80px]">
-                      {image ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={image} alt="preview" className="w-10 h-10 object-cover rounded" />
-                      ) : (
-                        "—"
-                      )}
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
+                      </TableHead>
+                      <TableHead className="whitespace-nowrap w-[300px]">Text</TableHead>
+                      <TableHead 
+                        className="whitespace-nowrap w-[100px] cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800"
+                        onClick={() => handleSort('type')}
+                      >
+                        <div className="flex items-center gap-1">
+                          Type
+                          {sortField === 'type' && (
+                            sortDirection === 'asc' ? <SortAsc className="h-4 w-4" /> : <SortDesc className="h-4 w-4" />
+                          )}
+                        </div>
+                      </TableHead>
+                      <TableHead className="whitespace-nowrap w-[200px]">Headline</TableHead>
+                      <TableHead className="whitespace-nowrap w-[200px]">URL</TableHead>
+                      <TableHead 
+                        className="whitespace-nowrap w-[80px] cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800"
+                        onClick={() => handleSort('likes')}
+                      >
+                        <div className="flex items-center gap-1">
+                          Likes
+                          {sortField === 'likes' && (
+                            sortDirection === 'asc' ? <SortAsc className="h-4 w-4" /> : <SortDesc className="h-4 w-4" />
+                          )}
+                        </div>
+                      </TableHead>
+                      <TableHead className="whitespace-nowrap w-[80px]">Image</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {groupItems.map((item, idx) => {
+                      const source = item?.resharedPost || item;
+                      const authorName = source?.authorName || (source?.author?.firstName && source?.author?.lastName ? `${source.author.firstName} ${source.author.lastName}` : "—");
+                      const authorHeadline = source?.authorHeadline || source?.author?.occupation || "—";
+                      const type = source?.type || source?.contentType || "—";
+                      const text = (source?.text || "").toString().slice(0, 180);
+                      const url = source?.url || source?.shareUrl || source?.postUrl || "";
+                      const image = (Array.isArray(source?.images) && source.images[0]) || source?.thumbnail || source?.authorProfilePicture || "";
+                      const likes = source?.numLikes || 0;
+                      const isSelected = selectedItems.includes(startIndex + idx);
+                      
+                      return (
+                        <TableRow key={`${sourceUrl}-${idx}`} className={isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""}>
+                          <TableCell className="w-[50px]">
+                            <Checkbox
+                              checked={isSelected}
+                              onCheckedChange={(checked) => handleSelectItem(idx, checked)}
+                            />
+                          </TableCell>
+                          <TableCell className="whitespace-nowrap align-top w-[150px]">
+                            <div className="text-sm font-medium truncate" title={authorName || "—"}>
+                              {authorName || "—"}
+                            </div>
+                          </TableCell>
+                          <TableCell className="align-top w-[300px]">
+                            <div className="space-y-2">
+                              <div className="text-sm line-clamp-3" title={text || "—"}>
+                                {text || "—"}
+                              </div>
+                              {text && text.length > 100 && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => openTextViewer(source)}
+                                  className="text-xs h-7 px-2"
+                                >
+                                  <Eye className="h-3 w-3 mr-1" />
+                                  View Full Text
+                                </Button>
+                              )}
+                            </div>
+                          </TableCell>
+                          <TableCell className="whitespace-nowrap align-top w-[100px]">
+                            <Badge variant="secondary" className="text-xs">
+                              {type}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="align-top w-[200px]">
+                            <div className="text-sm line-clamp-2" title={authorHeadline || "—"}>
+                              {authorHeadline || "—"}
+                            </div>
+                          </TableCell>
+                          <TableCell className="align-top w-[200px]">
+                            {url ? (
+                              <a 
+                                href={url} 
+                                target="_blank" 
+                                rel="noreferrer" 
+                                className="text-blue-600 hover:text-blue-800 text-xs break-all line-clamp-2 block"
+                                title={url}
+                              >
+                                {url.length > 40 ? `${url.substring(0, 40)}...` : url}
+                              </a>
+                            ) : (
+                              "—"
+                            )}
+                          </TableCell>
+                          <TableCell className="align-top w-[80px] text-center">
+                            {likes > 0 ? (
+                              <span className="text-sm font-medium">👍 {likes}</span>
+                            ) : (
+                              "—"
+                            )}
+                          </TableCell>
+                          <TableCell className="align-top w-[80px]">
+                            {image ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img src={image} alt="preview" className="w-10 h-10 object-cover rounded" />
+                            ) : (
+                              "—"
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
+          ))}
         </div>
       )}
 
@@ -598,7 +671,7 @@ export default function ResultsPage() {
       {results.length > 0 && totalPages > 1 && (
         <div className="flex items-center justify-between mt-4">
           <div className="text-sm text-muted-foreground">
-            Showing {startIndex + 1} to {Math.min(endIndex, filteredAndSortedResults.length)} of {filteredAndSortedResults.length} results
+            Showing {startIndex + 1} to {Math.min(endIndex, totalFilteredItems)} of {totalFilteredItems} results
           </div>
           <div className="flex items-center gap-2">
             <Button

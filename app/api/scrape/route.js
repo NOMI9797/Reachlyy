@@ -88,11 +88,28 @@ export async function POST(request) {
             // Fetch results
             const { items } = await client.dataset(run.defaultDatasetId).listItems();
             
+            // Add source URL tracking to each item
+            const itemsWithSource = items.map((item, index) => {
+              // Try to get sourceUrl from the item first
+              if (item.sourceUrl) {
+                return { ...item, sourceUrl: item.sourceUrl };
+              }
+              
+              // Distribute items evenly across URLs
+              const sourceIndex = Math.floor(index / Math.ceil(items.length / urls.length));
+              const assignedUrl = urls[Math.min(sourceIndex, urls.length - 1)];
+              
+              return {
+                ...item,
+                sourceUrl: assignedUrl
+              };
+            });
+            
             // Send final results
             controller.enqueue(encoder.encode(`data: ${JSON.stringify({ 
               progress: 100, 
               status: 'Complete!', 
-              items,
+              items: itemsWithSource,
               completed: true 
             })}\n\n`));
             
@@ -122,7 +139,24 @@ export async function POST(request) {
     const run = await client.actor('Wpp1BZ6yGWjySadk3').call(input);
     const { items } = await client.dataset(run.defaultDatasetId).listItems();
 
-    return NextResponse.json({ items, runId: run.id });
+    // Add source URL tracking to each item
+    const itemsWithSource = items.map((item, index) => {
+      // Try to get sourceUrl from the item first
+      if (item.sourceUrl) {
+        return { ...item, sourceUrl: item.sourceUrl };
+      }
+      
+      // Distribute items evenly across URLs
+      const sourceIndex = Math.floor(index / Math.ceil(items.length / urls.length));
+      const assignedUrl = urls[Math.min(sourceIndex, urls.length - 1)];
+      
+      return {
+        ...item,
+        sourceUrl: assignedUrl
+      };
+    });
+
+    return NextResponse.json({ items: itemsWithSource, runId: run.id });
   } catch (error) {
     console.error('Scrape API error', error);
     return NextResponse.json({ error: error?.message || 'Unknown error' }, { status: 500 });
