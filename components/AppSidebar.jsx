@@ -51,7 +51,7 @@ export function AppSidebar() {
       </SidebarContent>
       <SidebarSeparator />
       <SidebarFooter>
-        <div className="text-xs text-muted-foreground px-2">v0.1.0</div>
+     
       </SidebarFooter>
     </Sidebar>
   );
