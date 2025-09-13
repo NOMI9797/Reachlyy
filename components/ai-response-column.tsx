@@ -7,7 +7,6 @@ import { Badge } from "@/components/ui/badge"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Slider } from "@/components/ui/slider"
 import { ChevronLeft, ChevronRight, Wand2, Copy, RefreshCw, Settings, Loader2, Sparkles } from "lucide-react"
 
 interface AIResponseColumnProps {
@@ -18,7 +17,6 @@ interface AIResponseColumnProps {
 
 export function AIResponseColumn({ selectedLead, collapsed, onToggleCollapse }: AIResponseColumnProps) {
   const [selectedModel, setSelectedModel] = useState("gpt-4")
-  const [postsToUse, setPostsToUse] = useState([3])
   const [customPrompt, setCustomPrompt] = useState("")
   const [generatedMessage, setGeneratedMessage] = useState("")
   const [isGenerating, setIsGenerating] = useState(false)
@@ -130,11 +128,6 @@ export function AIResponseColumn({ selectedLead, collapsed, onToggleCollapse }: 
             </Select>
           </div>
 
-          <div className="space-y-2">
-            <Label>Posts to analyze: {postsToUse[0]}</Label>
-            <Slider value={postsToUse} onValueChange={setPostsToUse} max={5} min={1} step={1} className="w-full" />
-            <div className="text-xs text-muted-foreground">Use the {postsToUse[0]} most recent posts for context</div>
-          </div>
 
           <div className="space-y-2">
             <Label htmlFor="custom-prompt">Custom Instructions (Optional)</Label>
