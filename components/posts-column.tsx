@@ -75,17 +75,52 @@ export function PostsColumn({ selectedLead, collapsed, onToggleCollapse }: Posts
     if (!selectedLead) return
 
     setIsLoading(true)
-    // Simulate API call
-    await new Promise((resolve) => setTimeout(resolve, 1500))
-
-    setPosts(mockPosts)
+    
+    // Use scraped posts if available, otherwise use mock data
+    if (selectedLead.posts && selectedLead.posts.length > 0) {
+      // Transform scraped data to match Post interface
+      const transformedPosts: Post[] = selectedLead.posts.map((item: any, index: number) => ({
+        id: item.id || `post-${index}`,
+        content: item.content || item.text || item.description || "No content available",
+        timestamp: item.timestamp || item.date || item.createdAt || new Date().toISOString(),
+        likes: item.numLikes || item.likes || item.likeCount || 0,
+        comments: item.numComments || item.comments || item.commentCount || 0,
+        reposts: item.numShares || item.reposts || item.repostCount || item.shares || 0,
+        url: item.url || item.link || selectedLead.url
+      }))
+      
+      setPosts(transformedPosts)
+    } else {
+      // Fallback to mock data if no scraped posts
+      setPosts(mockPosts)
+    }
+    
     setLastFetched(new Date().toISOString())
     setIsLoading(false)
   }
 
   useEffect(() => {
     if (selectedLead && selectedLead.status === "completed") {
-      fetchPosts()
+      // Auto-load posts when lead is completed
+      if (selectedLead.posts && selectedLead.posts.length > 0) {
+        // Transform scraped data to match Post interface
+        const transformedPosts: Post[] = selectedLead.posts.map((item: any, index: number) => ({
+          id: item.id || `post-${index}`,
+          content: item.content || item.text || item.description || "No content available",
+          timestamp: item.timestamp || item.date || item.createdAt || new Date().toISOString(),
+          likes: item.numLikes || item.likes || item.likeCount || 0,
+          comments: item.numComments || item.comments || item.commentCount || 0,
+          reposts: item.numShares || item.reposts || item.repostCount || item.shares || 0,
+          url: item.url || item.link || selectedLead.url
+        }))
+        
+        setPosts(transformedPosts)
+        setLastFetched(new Date().toISOString())
+      } else {
+        // No scraped posts, show empty state
+        setPosts([])
+        setLastFetched(null)
+      }
     } else {
       setPosts([])
       setLastFetched(null)
@@ -138,19 +173,7 @@ export function PostsColumn({ selectedLead, collapsed, onToggleCollapse }: Posts
         </div>
 
         {selectedLead && (
-          <div className="flex items-center justify-between">
-            <div className="text-sm text-muted-foreground">{selectedLead.name || "Selected Lead"}</div>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={fetchPosts}
-              disabled={isLoading}
-              className="gap-1 bg-transparent"
-            >
-              {isLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
-              Fetch Posts
-            </Button>
-          </div>
+          <div className="text-sm text-muted-foreground">{selectedLead.name || "Selected Lead"}</div>
         )}
 
         {lastFetched && (

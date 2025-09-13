@@ -101,7 +101,6 @@ export function CampaignWorkspace({ campaign, onBack }: CampaignWorkspaceProps) 
           style={{ width: collapsedColumns.has(0) ? "48px" : `${columnWidths[0]}%` }}
         >
           <LeadsColumn
-            campaign={campaign}
             leads={leads}
             setLeads={setLeads}
             selectedLead={selectedLead}
