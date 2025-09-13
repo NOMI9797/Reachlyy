@@ -45,6 +45,10 @@ interface LeadsColumnProps {
   onSelectLead: (lead: Lead) => void
   collapsed: boolean
   onToggleCollapse: () => void
+  campaignId: string
+  onRefreshLeads: () => void
+  loading: boolean
+  error: string | null
 }
 
 export function LeadsColumn({
@@ -54,6 +58,10 @@ export function LeadsColumn({
   onSelectLead,
   collapsed,
   onToggleCollapse,
+  campaignId,
+  onRefreshLeads,
+  loading,
+  error,
 }: LeadsColumnProps) {
   const [showAddForm, setShowAddForm] = useState(false)
   const [newUrls, setNewUrls] = useState("")
@@ -139,20 +147,47 @@ export function LeadsColumn({
             }
 
 
-            // Create leads from URLs
-            const newLeads: Lead[] = urls.map((url, index) => ({
-              id: Date.now().toString() + Math.random() + index,
-              url: url.trim(),
-              status: "pending" as const,
-              addedAt: new Date().toISOString(),
-            }))
+            // Save leads to database
+            const saveLeadsToDatabase = async () => {
+              try {
+                const response = await fetch(`/api/campaigns/${campaignId}/leads`, {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify({ urls }),
+                })
 
-            setLeads([...leads, ...newLeads])
-            
-            toast({
-              title: "Import Successful",
-              description: `Imported ${urls.length} LinkedIn profile URLs from CSV`,
-            })
+                const result = await response.json()
+
+                if (result.success) {
+                  const duplicateMessage = result.duplicatesSkipped > 0 
+                    ? ` (${result.duplicatesSkipped} duplicates skipped)`
+                    : '';
+                  
+                  toast({
+                    title: "Import Successful",
+                    description: `Imported ${result.data.length} LinkedIn profile URLs from CSV${duplicateMessage}`,
+                  })
+                  onRefreshLeads() // Refresh the leads list
+                } else {
+                  toast({
+                    title: "Import Failed",
+                    description: result.message || "Failed to save leads to database",
+                    variant: "destructive",
+                  })
+                }
+              } catch (error) {
+                console.error('Error saving CSV leads:', error)
+                toast({
+                  title: "Import Failed",
+                  description: "Failed to save leads to database",
+                  variant: "destructive",
+                })
+              }
+            }
+
+            saveLeadsToDatabase()
           } catch (error) {
             console.error('CSV import error:', error)
             toast({
@@ -168,18 +203,56 @@ export function LeadsColumn({
     input.click()
   }
 
-  const handleAddUrls = () => {
-    const urls = newUrls.split("\n").filter((url) => url.trim())
-    const newLeads: Lead[] = urls.map((url) => ({
-      id: Date.now().toString() + Math.random(),
-      url: url.trim(),
-      status: "pending" as const,
-      addedAt: new Date().toISOString(),
-    }))
+  const handleAddUrls = async () => {
+    const urls = newUrls.split("\n").filter((url) => url.trim() && url.includes("linkedin.com"))
+    
+    if (urls.length === 0) {
+      toast({
+        title: "No valid URLs",
+        description: "Please enter valid LinkedIn profile URLs",
+        variant: "destructive",
+      })
+      return
+    }
 
-    setLeads([...leads, ...newLeads])
-    setNewUrls("")
-    setShowAddForm(false)
+    try {
+      const response = await fetch(`/api/campaigns/${campaignId}/leads`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ urls }),
+      })
+
+      const result = await response.json()
+
+      if (result.success) {
+        const duplicateMessage = result.duplicatesSkipped > 0 
+          ? ` (${result.duplicatesSkipped} duplicates skipped)`
+          : '';
+        
+        toast({
+          title: "Leads added successfully",
+          description: `Added ${result.data.length} leads to campaign${duplicateMessage}`,
+        })
+        setNewUrls("")
+        setShowAddForm(false)
+        onRefreshLeads() // Refresh the leads list
+      } else {
+        toast({
+          title: "Failed to add leads",
+          description: result.message || "An error occurred",
+          variant: "destructive",
+        })
+      }
+    } catch (error) {
+      console.error('Error adding leads:', error)
+      toast({
+        title: "Error",
+        description: "Failed to add leads to campaign",
+        variant: "destructive",
+      })
+    }
   }
 
   const handleRunSelected = async () => {
@@ -213,38 +286,70 @@ export function LeadsColumn({
 
       const data = await response.json()
       
-      // Extract author info from posts
-      let authorName = "Unknown"
-      let authorHeadline = "Unknown"
-      let profilePicture = ""
+      if (!data.items || data.items.length === 0) {
+        throw new Error('No posts found for this profile')
+      }
+
+      // Extract comprehensive lead info from all posts
+      const { extractLeadInfo, cleanScrapedPosts } = await import('@/lib/scraping-utils')
+      const cleanedPosts = cleanScrapedPosts(data.items)
+      const leadInfo = extractLeadInfo(cleanedPosts)
       
-      if (data.items && data.items.length > 0) {
-        const firstPost = data.items[0]
-        authorName = firstPost?.authorName || firstPost?.name || "Unknown"
-        authorHeadline = firstPost?.authorHeadline || firstPost?.headline || firstPost?.title || "Unknown"
-        profilePicture = firstPost?.authorProfilePicture || firstPost?.authorImage || firstPost?.profilePicture || firstPost?.avatar || ""
+      // Save posts to database first
+      const postsResponse = await fetch(`/api/leads/${selectedLead.id}/posts`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          posts: cleanedPosts
+        }),
+      })
+
+      if (!postsResponse.ok) {
+        console.warn('Failed to save posts to database, but continuing with lead update')
       }
       
-      // Update lead with scraped data
-      const completedLeads = leads.map((lead) =>
-        lead.id === selectedLead.id
-          ? {
-              ...lead,
-              status: "completed" as const,
-              name: authorName,
-              title: authorHeadline,
-              company: "Unknown",
-              posts: data.items || [],
-              profilePicture: profilePicture
-            }
-          : lead,
-      )
-      setLeads(completedLeads)
-      
-      toast({
-        title: "Scraping Complete",
-        description: `Successfully scraped ${selectedLead.url}`,
+      // Update lead with extracted information
+      const leadUpdateResponse = await fetch(`/api/leads/${selectedLead.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: leadInfo.name,
+          title: leadInfo.title,
+          company: leadInfo.company,
+          status: "completed",
+          profilePicture: leadInfo.profilePicture,
+          posts: cleanedPosts // Keep posts in lead for backward compatibility
+        }),
       })
+
+      if (leadUpdateResponse.ok) {
+        // Update local state
+        const completedLeads = leads.map((lead) =>
+          lead.id === selectedLead.id
+            ? {
+                ...lead,
+                status: "completed" as const,
+                name: leadInfo.name,
+                title: leadInfo.title,
+                company: leadInfo.company,
+                posts: cleanedPosts,
+                profilePicture: leadInfo.profilePicture
+              }
+            : lead,
+        )
+        setLeads(completedLeads)
+        
+        toast({
+          title: "Scraping Complete",
+          description: `Successfully scraped ${cleanedPosts.length} posts for ${leadInfo.name}`,
+        })
+      } else {
+        throw new Error('Failed to save lead data to database')
+      }
     } catch (error) {
       console.error('Scraping error:', error)
       const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred'
@@ -255,6 +360,21 @@ export function LeadsColumn({
         variant: "destructive",
       })
       
+      // Update lead status to error in database
+      try {
+        await fetch(`/api/leads/${selectedLead.id}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            status: "error"
+          }),
+        })
+      } catch (updateError) {
+        console.error('Failed to update lead status to error:', updateError)
+      }
+
       const errorLeads = leads.map((lead) =>
         lead.id === selectedLead.id ? { ...lead, status: "error" as const } : lead,
       )
@@ -339,33 +459,87 @@ export function LeadsColumn({
                     itemsBySource.get(sourceUrl).push(item)
                   })
 
-                  // Update leads with their respective data
+                  // Process each lead and save to database
+                  const { extractLeadInfo, cleanScrapedPosts } = await import('@/lib/scraping-utils')
+                  let completedCount = 0
+                  let totalPosts = 0
+
+                  for (const lead of pendingLeads) {
+                    const leadItems = itemsBySource.get(lead.url) || []
+                    
+                    if (leadItems.length > 0) {
+                      try {
+                        // Clean and extract lead info
+                        const cleanedPosts = cleanScrapedPosts(leadItems)
+                        const leadInfo = extractLeadInfo(cleanedPosts)
+                        
+                        // Save posts to database
+                        const postsResponse = await fetch(`/api/leads/${lead.id}/posts`, {
+                          method: 'POST',
+                          headers: {
+                            'Content-Type': 'application/json',
+                          },
+                          body: JSON.stringify({
+                            posts: cleanedPosts
+                          }),
+                        })
+
+                        if (!postsResponse.ok) {
+                          console.warn(`Failed to save posts for lead ${lead.id}`)
+                        }
+                        
+                        // Update lead with extracted information
+                        const leadUpdateResponse = await fetch(`/api/leads/${lead.id}`, {
+                          method: 'PUT',
+                          headers: {
+                            'Content-Type': 'application/json',
+                          },
+                          body: JSON.stringify({
+                            name: leadInfo.name,
+                            title: leadInfo.title,
+                            company: leadInfo.company,
+                            status: "completed",
+                            profilePicture: leadInfo.profilePicture,
+                            posts: cleanedPosts // Keep posts in lead for backward compatibility
+                          }),
+                        })
+
+                        if (leadUpdateResponse.ok) {
+                          completedCount++
+                          totalPosts += cleanedPosts.length
+                        } else {
+                          console.warn(`Failed to update lead ${lead.id}`)
+                        }
+                      } catch (error) {
+                        console.error(`Error processing lead ${lead.id}:`, error)
+                      }
+                    }
+                  }
+
+                  // Update local state with database data
                   setLeads((prev: Lead[]) =>
                     prev.map((lead: Lead) => {
                       if (pendingLeads.some(pending => pending.id === lead.id)) {
                         const leadItems = itemsBySource.get(lead.url) || []
                         
-                        // Extract author info from posts
-                        let authorName = "Unknown"
-                        let authorHeadline = "Unknown"
-                        let profilePicture = ""
-                        
                         if (leadItems.length > 0) {
-                          // Look for author info in the first post
-                          const firstPost = leadItems[0]
-                          authorName = firstPost?.authorName || firstPost?.name || "Unknown"
-                          authorHeadline = firstPost?.authorHeadline || firstPost?.headline || firstPost?.title || "Unknown"
-                          profilePicture = firstPost?.authorProfilePicture || firstPost?.authorImage || firstPost?.profilePicture || firstPost?.avatar || ""
-                        }
-                        
-                        return {
-                          ...lead,
-                          status: "completed" as const,
-                          name: authorName,
-                          title: authorHeadline,
-                          company: "Unknown",
-                          posts: leadItems,
-                          profilePicture: profilePicture
+                          const cleanedPosts = cleanScrapedPosts(leadItems)
+                          const leadInfo = extractLeadInfo(cleanedPosts)
+                          
+                          return {
+                            ...lead,
+                            status: "completed" as const,
+                            name: leadInfo.name,
+                            title: leadInfo.title,
+                            company: leadInfo.company,
+                            posts: cleanedPosts,
+                            profilePicture: leadInfo.profilePicture
+                          }
+                        } else {
+                          return {
+                            ...lead,
+                            status: "error" as const
+                          }
                         }
                       }
                       return lead
@@ -374,7 +548,7 @@ export function LeadsColumn({
                   
                   toast({
                     title: "Scraping Complete",
-                    description: `Successfully scraped ${pendingLeads.length} leads`,
+                    description: `Successfully scraped ${completedCount} leads with ${totalPosts} total posts`,
                   })
                 } else if (data.error) {
                   // Handle error from streaming
@@ -383,6 +557,23 @@ export function LeadsColumn({
                     description: `Scraping failed: ${data.error}`,
                     variant: "destructive",
                   })
+                  
+                  // Update error status in database for all pending leads
+                  for (const lead of pendingLeads) {
+                    try {
+                      await fetch(`/api/leads/${lead.id}`, {
+                        method: 'PUT',
+                        headers: {
+                          'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                          status: "error"
+                        }),
+                      })
+                    } catch (updateError) {
+                      console.error(`Failed to update lead ${lead.id} status to error:`, updateError)
+                    }
+                  }
                   
                   setLeads((prev: Lead[]) =>
                     prev.map((lead: Lead) =>
@@ -409,6 +600,23 @@ export function LeadsColumn({
         variant: "destructive",
       })
       
+      // Update error status in database for all pending leads
+      for (const lead of pendingLeads) {
+        try {
+          await fetch(`/api/leads/${lead.id}`, {
+            method: 'PUT',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              status: "error"
+            }),
+          })
+        } catch (updateError) {
+          console.error(`Failed to update lead ${lead.id} status to error:`, updateError)
+        }
+      }
+
       setLeads((prev: Lead[]) =>
         prev.map((lead: Lead) =>
           pendingLeads.some(pending => pending.id === lead.id)

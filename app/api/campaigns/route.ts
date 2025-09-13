@@ -1,12 +1,27 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { campaigns } from '@/lib/schema';
-import { eq } from 'drizzle-orm';
+import { campaigns, leads } from '@/lib/schema';
+import { eq, sql } from 'drizzle-orm';
 
-// GET /api/campaigns - Get all campaigns
+// GET /api/campaigns - Get all campaigns with lead counts
 export async function GET() {
   try {
-    const allCampaigns = await db.select().from(campaigns).orderBy(campaigns.createdAt);
+    // Get campaigns with lead counts using LEFT JOIN and GROUP BY
+    const allCampaigns = await db
+      .select({
+        id: campaigns.id,
+        name: campaigns.name,
+        description: campaigns.description,
+        status: campaigns.status,
+        createdAt: campaigns.createdAt,
+        updatedAt: campaigns.updatedAt,
+        leadsCount: sql<number>`COALESCE(COUNT(${leads.id})::int, 0)`.as('leadsCount')
+      })
+      .from(campaigns)
+      .leftJoin(leads, eq(leads.campaignId, campaigns.id))
+      .groupBy(campaigns.id, campaigns.name, campaigns.description, campaigns.status, campaigns.createdAt, campaigns.updatedAt)
+      .orderBy(campaigns.createdAt);
+
     return NextResponse.json({ 
       success: true, 
       data: allCampaigns 

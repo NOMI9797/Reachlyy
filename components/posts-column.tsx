@@ -76,23 +76,58 @@ export function PostsColumn({ selectedLead, collapsed, onToggleCollapse }: Posts
 
     setIsLoading(true)
     
-    // Use scraped posts if available, otherwise use mock data
-    if (selectedLead.posts && selectedLead.posts.length > 0) {
-      // Transform scraped data to match Post interface
-      const transformedPosts: Post[] = selectedLead.posts.map((item: any, index: number) => ({
-        id: item.id || `post-${index}`,
-        content: item.content || item.text || item.description || "No content available",
-        timestamp: item.timestamp || item.date || item.createdAt || new Date().toISOString(),
-        likes: item.numLikes || item.likes || item.likeCount || 0,
-        comments: item.numComments || item.comments || item.commentCount || 0,
-        reposts: item.numShares || item.reposts || item.repostCount || item.shares || 0,
-        url: item.url || item.link || selectedLead.url
-      }))
+    try {
+      // First try to fetch posts from database
+      const response = await fetch(`/api/leads/${selectedLead.id}/posts`)
+      const result = await response.json()
       
-      setPosts(transformedPosts)
-    } else {
-      // Fallback to mock data if no scraped posts
-      setPosts(mockPosts)
+      if (result.success && result.data.length > 0) {
+        // Transform database posts to match Post interface
+        const transformedPosts: Post[] = result.data.map((post: any) => ({
+          id: post.id,
+          content: post.content,
+          timestamp: post.timestamp,
+          likes: post.likes || 0,
+          comments: post.comments || 0,
+          reposts: post.shares || 0,
+          url: selectedLead.url
+        }))
+        
+        setPosts(transformedPosts)
+      } else if (selectedLead.posts && selectedLead.posts.length > 0) {
+        // Fallback to posts stored in lead object (for backward compatibility)
+        const transformedPosts: Post[] = selectedLead.posts.map((item: any, index: number) => ({
+          id: item.id || `post-${index}`,
+          content: item.content || item.text || item.description || "No content available",
+          timestamp: item.timestamp || item.date || item.createdAt || new Date().toISOString(),
+          likes: item.numLikes || item.likes || item.likeCount || 0,
+          comments: item.numComments || item.comments || item.commentCount || 0,
+          reposts: item.numShares || item.reposts || item.repostCount || item.shares || 0,
+          url: item.url || item.link || selectedLead.url
+        }))
+        
+        setPosts(transformedPosts)
+      } else {
+        // Fallback to mock data if no posts found anywhere
+        setPosts(mockPosts)
+      }
+    } catch (error) {
+      console.error('Error fetching posts:', error)
+      // Fallback to lead posts or mock data on error
+      if (selectedLead.posts && selectedLead.posts.length > 0) {
+        const transformedPosts: Post[] = selectedLead.posts.map((item: any, index: number) => ({
+          id: item.id || `post-${index}`,
+          content: item.content || item.text || item.description || "No content available",
+          timestamp: item.timestamp || item.date || item.createdAt || new Date().toISOString(),
+          likes: item.numLikes || item.likes || item.likeCount || 0,
+          comments: item.numComments || item.comments || item.commentCount || 0,
+          reposts: item.numShares || item.reposts || item.repostCount || item.shares || 0,
+          url: item.url || item.link || selectedLead.url
+        }))
+        setPosts(transformedPosts)
+      } else {
+        setPosts(mockPosts)
+      }
     }
     
     setLastFetched(new Date().toISOString())

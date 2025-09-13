@@ -12,6 +12,36 @@ export const campaigns = pgTable('campaigns', {
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 
+// Leads table
+export const leads = pgTable('leads', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  campaignId: uuid('campaign_id').references(() => campaigns.id, { onDelete: 'cascade' }).notNull(),
+  url: text('url').notNull(),
+  name: text('name'),
+  title: text('title'),
+  company: text('company'),
+  status: varchar('status', { length: 20 }).notNull().default('pending'),
+  profilePicture: text('profile_picture'),
+  posts: json('posts'), // Store scraped posts as JSON array
+  addedAt: timestamp('added_at').defaultNow().notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// Posts table - for detailed post storage
+export const posts = pgTable('posts', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  leadId: uuid('lead_id').references(() => leads.id, { onDelete: 'cascade' }).notNull(),
+  content: text('content').notNull(),
+  timestamp: timestamp('timestamp').notNull(),
+  likes: integer('likes').default(0),
+  comments: integer('comments').default(0),
+  shares: integer('shares').default(0),
+  engagement: integer('engagement').default(0),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
 
 
 // Database initialization function

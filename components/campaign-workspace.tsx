@@ -2,12 +2,26 @@
 
 import type React from "react"
 
-import { useState, useRef } from "react"
+import { useState, useRef, useEffect } from "react"
 import { Button } from "@/components/ui/button"
-import { ArrowLeft, Settings } from "lucide-react"
+import { ArrowLeft, Settings, Loader2 } from "lucide-react"
 import { LeadsColumn } from "@/components/leads-column"
 import { PostsColumn } from "@/components/posts-column"
 import { AIResponseColumn } from "@/components/ai-response-column"
+
+interface Lead {
+  id: string
+  url: string
+  name?: string
+  title?: string
+  company?: string
+  status: "pending" | "processing" | "completed" | "error"
+  profilePicture?: string
+  posts?: any[]
+  addedAt: string
+  createdAt: string
+  updatedAt: string
+}
 
 interface CampaignWorkspaceProps {
   campaign: any
@@ -15,14 +29,50 @@ interface CampaignWorkspaceProps {
 }
 
 export function CampaignWorkspace({ campaign, onBack }: CampaignWorkspaceProps) {
-  const [selectedLead, setSelectedLead] = useState<any>(null)
-  const [leads, setLeads] = useState<any[]>([])
+  const [selectedLead, setSelectedLead] = useState<Lead | null>(null)
+  const [leads, setLeads] = useState<Lead[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [columnWidths, setColumnWidths] = useState([33, 33, 34]) // percentages
   const [collapsedColumns, setCollapsedColumns] = useState<Set<number>>(new Set())
 
   const containerRef = useRef<HTMLDivElement>(null)
   const isDragging = useRef(false)
   const dragColumn = useRef<number>(-1)
+
+  // Fetch leads for this campaign
+  const fetchLeads = async () => {
+    try {
+      setLoading(true)
+      setError(null)
+      
+      const response = await fetch(`/api/campaigns/${campaign.id}/leads`)
+      const result = await response.json()
+      
+      if (result.success) {
+        setLeads(result.data)
+      } else {
+        setError(result.message || 'Failed to fetch leads')
+      }
+    } catch (err) {
+      setError('Failed to fetch leads')
+      console.error('Error fetching leads:', err)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Load leads when campaign changes
+  useEffect(() => {
+    if (campaign?.id) {
+      fetchLeads()
+    }
+  }, [campaign?.id])
+
+  // Function to refresh leads after adding new ones
+  const refreshLeads = () => {
+    fetchLeads()
+  }
 
   const handleMouseDown = (columnIndex: number) => (e: React.MouseEvent) => {
     isDragging.current = true
@@ -107,6 +157,10 @@ export function CampaignWorkspace({ campaign, onBack }: CampaignWorkspaceProps) 
             onSelectLead={setSelectedLead}
             collapsed={collapsedColumns.has(0)}
             onToggleCollapse={() => toggleColumn(0)}
+            campaignId={campaign.id}
+            onRefreshLeads={refreshLeads}
+            loading={loading}
+            error={error}
           />
         </div>
 

@@ -42,7 +42,7 @@ export function CampaignsList({ onSelectCampaign }: CampaignsListProps) {
           name: campaign.name,
           description: campaign.description,
           createdAt: campaign.createdAt,
-          leadsCount: 0, // TODO: Calculate from campaign_leads table
+          leadsCount: parseInt(campaign.leadsCount) || 0, // Use actual lead count from database
           messagesGenerated: 0, // TODO: Calculate from messages table
           status: campaign.status,
         }))
