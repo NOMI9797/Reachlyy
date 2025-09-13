@@ -39,19 +39,24 @@ export function CreateCampaignModal({ open, onClose, onSubmit }: CreateCampaignM
     if (!formData.name.trim()) return
 
     setIsSubmitting(true)
-    // Simulate API call
-    await new Promise((resolve) => setTimeout(resolve, 1000))
-
-    onSubmit(formData)
-    setIsSubmitting(false)
-
-    // Reset form
-    setFormData({
-      name: "",
-      description: "",
-      searchUrl: "",
-      csvFile: null,
-    })
+    
+    try {
+      // Call the parent's onSubmit function which will handle the API call
+      await onSubmit(formData)
+      
+      // Reset form only on success
+      setFormData({
+        name: "",
+        description: "",
+        searchUrl: "",
+        csvFile: null,
+      })
+    } catch (error) {
+      console.error('Error creating campaign:', error)
+      // Don't reset form on error so user can retry
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {

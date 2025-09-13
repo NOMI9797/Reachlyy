@@ -1,10 +1,10 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Plus, Users, MessageSquare, Calendar } from "lucide-react"
+import { Plus, Users, MessageSquare, Calendar, Loader2 } from "lucide-react"
 import { CreateCampaignModal } from "@/components/create-campaign-modal"
 
 interface Campaign {
@@ -14,7 +14,7 @@ interface Campaign {
   createdAt: string
   leadsCount: number
   messagesGenerated: number
-  status: "active" | "paused" | "completed"
+  status: "draft" | "active" | "paused" | "completed"
 }
 
 interface CampaignsListProps {
@@ -23,44 +23,88 @@ interface CampaignsListProps {
 
 export function CampaignsList({ onSelectCampaign }: CampaignsListProps) {
   const [showCreateModal, setShowCreateModal] = useState(false)
-  const [campaigns, setCampaigns] = useState<Campaign[]>([
-    {
-      id: "1",
-      name: "Tech Startup Outreach",
-      description: "Targeting startup founders and CTOs",
-      createdAt: "2024-01-15",
-      leadsCount: 247,
-      messagesGenerated: 89,
-      status: "active",
-    },
-    {
-      id: "2",
-      name: "SaaS Decision Makers",
-      description: "B2B SaaS company executives",
-      createdAt: "2024-01-10",
-      leadsCount: 156,
-      messagesGenerated: 156,
-      status: "completed",
-    },
-  ])
+  const [campaigns, setCampaigns] = useState<Campaign[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
-  const handleCreateCampaign = (campaignData: any) => {
-    const newCampaign: Campaign = {
-      id: Date.now().toString(),
-      name: campaignData.name,
-      description: campaignData.description,
-      createdAt: new Date().toISOString().split("T")[0],
-      leadsCount: 0,
-      messagesGenerated: 0,
-      status: "active",
+  // Fetch campaigns from API
+  const fetchCampaigns = async () => {
+    try {
+      setLoading(true)
+      setError(null)
+      const response = await fetch('/api/campaigns')
+      const result = await response.json()
+      
+      if (result.success) {
+        // Transform database campaigns to match the interface
+        const transformedCampaigns = result.data.map((campaign: any) => ({
+          id: campaign.id,
+          name: campaign.name,
+          description: campaign.description,
+          createdAt: campaign.createdAt,
+          leadsCount: 0, // TODO: Calculate from campaign_leads table
+          messagesGenerated: 0, // TODO: Calculate from messages table
+          status: campaign.status,
+        }))
+        setCampaigns(transformedCampaigns)
+      } else {
+        setError(result.message || 'Failed to fetch campaigns')
+      }
+    } catch (err) {
+      setError('Failed to fetch campaigns')
+      console.error('Error fetching campaigns:', err)
+    } finally {
+      setLoading(false)
     }
-    setCampaigns([newCampaign, ...campaigns])
-    setShowCreateModal(false)
-    onSelectCampaign(newCampaign)
+  }
+
+  // Load campaigns on component mount
+  useEffect(() => {
+    fetchCampaigns()
+  }, [])
+
+  const handleCreateCampaign = async (campaignData: any) => {
+    try {
+      const response = await fetch('/api/campaigns', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: campaignData.name,
+          description: campaignData.description,
+        }),
+      })
+      
+      const result = await response.json()
+      
+      if (result.success) {
+        // Transform the new campaign to match the interface
+        const newCampaign: Campaign = {
+          id: result.data.id,
+          name: result.data.name,
+          description: result.data.description,
+          createdAt: result.data.createdAt,
+          leadsCount: 0,
+          messagesGenerated: 0,
+          status: result.data.status,
+        }
+        setCampaigns([newCampaign, ...campaigns])
+        setShowCreateModal(false)
+        onSelectCampaign(newCampaign)
+      } else {
+        setError(result.message || 'Failed to create campaign')
+      }
+    } catch (err) {
+      setError('Failed to create campaign')
+      console.error('Error creating campaign:', err)
+    }
   }
 
   const getStatusColor = (status: string) => {
     switch (status) {
+      case "draft":
+        return "bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-300"
       case "active":
         return "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300"
       case "paused":
@@ -87,9 +131,33 @@ export function CampaignsList({ onSelectCampaign }: CampaignsListProps) {
           </Button>
         </div>
 
+        {/* Error State */}
+        {error && (
+          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
+            <p className="text-red-800">{error}</p>
+            <Button 
+              variant="outline" 
+              size="sm" 
+              className="mt-2"
+              onClick={fetchCampaigns}
+            >
+              Try Again
+            </Button>
+          </div>
+        )}
+
+        {/* Loading State */}
+        {loading && (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+            <span className="ml-2 text-muted-foreground">Loading campaigns...</span>
+          </div>
+        )}
+
         {/* Campaigns Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {campaigns.map((campaign) => (
+        {!loading && (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {campaigns.map((campaign) => (
             <Card
               key={campaign.id}
               className="cursor-pointer hover:shadow-md transition-shadow border-border bg-card"
@@ -125,10 +193,12 @@ export function CampaignsList({ onSelectCampaign }: CampaignsListProps) {
                 </div>
               </CardContent>
             </Card>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
 
-        {campaigns.length === 0 && (
+        {/* Empty State */}
+        {!loading && campaigns.length === 0 && !error && (
           <div className="text-center py-12">
             <div className="mx-auto w-24 h-24 bg-muted rounded-full flex items-center justify-center mb-4">
               <MessageSquare className="h-12 w-12 text-muted-foreground" />

@@ -1,20 +1,20 @@
-import { Pool } from 'pg';
+import { drizzle } from 'drizzle-orm/postgres-js';
+import postgres from 'postgres';
+import { migrate } from 'drizzle-orm/postgres-js/migrator';
+import * as schema from './schema';
 
-// Create a connection pool
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: {
-    rejectUnauthorized: false
-  }
-});
+// Create the connection
+const connectionString = process.env.DATABASE_URL!;
+const client = postgres(connectionString, { ssl: 'require' });
+
+// Create the database instance
+export const db = drizzle(client, { schema });
 
 // Test the database connection
 export async function testConnection() {
   try {
-    const client = await pool.connect();
-    const result = await client.query('SELECT NOW()');
-    client.release();
-    console.log('Database connected successfully:', result.rows[0]);
+    const result = await client`SELECT NOW()`;
+    console.log('Database connected successfully:', result[0]);
     return true;
   } catch (error) {
     console.error('Database connection failed:', error);
@@ -22,23 +22,20 @@ export async function testConnection() {
   }
 }
 
-// Execute a query
-export async function query(text: string, params?: any[]) {
-  const client = await pool.connect();
+// Initialize database with migrations
+export async function initializeDatabase() {
   try {
-    const result = await client.query(text, params);
-    return result;
+    await migrate(db, { migrationsFolder: './drizzle' });
+    console.log('Database initialized successfully');
   } catch (error) {
-    console.error('Query error:', error);
+    console.error('Database initialization failed:', error);
     throw error;
-  } finally {
-    client.release();
   }
 }
 
-// Close the pool (call this when shutting down the app)
-export async function closePool() {
-  await pool.end();
+// Close the connection (call this when shutting down the app)
+export async function closeConnection() {
+  await client.end();
 }
 
-export default pool;
+export default db;
