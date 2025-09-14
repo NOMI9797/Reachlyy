@@ -1,19 +1,91 @@
 import { NextResponse } from "next/server";
 import { db } from "@/libs/db";
-import { campaigns } from "@/libs/schema.js";
-import { desc } from "drizzle-orm";
+import { campaigns, leads, messages } from "@/libs/schema.js";
+import { desc, eq, count, and } from "drizzle-orm";
 
 // GET /api/campaigns - Get all campaigns (like Reachly)
 export async function GET() {
   try {
+    // Get all campaigns with their lead and message counts
     const allCampaigns = await db
-      .select()
+      .select({
+        id: campaigns.id,
+        name: campaigns.name,
+        description: campaigns.description,
+        status: campaigns.status,
+        createdAt: campaigns.createdAt,
+        updatedAt: campaigns.updatedAt,
+        leadsCount: count(leads.id),
+        messagesGenerated: count(messages.id),
+      })
       .from(campaigns)
+      .leftJoin(leads, eq(campaigns.id, leads.campaignId))
+      .leftJoin(messages, eq(campaigns.id, messages.campaignId))
+      .groupBy(campaigns.id)
       .orderBy(desc(campaigns.createdAt));
+
+    // Now get processed leads count for each campaign and update status
+    const campaignsWithProgress = await Promise.all(
+      allCampaigns.map(async (campaign) => {
+        const [processedCount] = await db
+          .select({ count: count(leads.id) })
+          .from(leads)
+          .where(
+            and(
+              eq(leads.campaignId, campaign.id),
+              eq(leads.status, 'completed')
+            )
+          );
+
+        // Get sent messages count for this campaign
+        const [sentMessagesCount] = await db
+          .select({ count: count(messages.id) })
+          .from(messages)
+          .where(
+            and(
+              eq(messages.campaignId, campaign.id),
+              eq(messages.status, 'sent')
+            )
+          );
+
+        const processedLeads = processedCount.count || 0;
+        const totalLeads = campaign.leadsCount;
+
+        // Determine the correct status based on campaign state
+        let newStatus = campaign.status;
+        if (totalLeads === 0) {
+          newStatus = 'draft'; // No leads added yet
+        } else if (processedLeads === 0) {
+          newStatus = 'active'; // Has leads but none processed yet
+        } else if (processedLeads < totalLeads) {
+          newStatus = 'active'; // Some leads processed, still in progress
+        } else if (processedLeads === totalLeads && totalLeads > 0) {
+          newStatus = 'completed'; // All leads processed
+        }
+
+        // Update campaign status if it changed
+        if (newStatus !== campaign.status) {
+          await db
+            .update(campaigns)
+            .set({ 
+              status: newStatus,
+              updatedAt: new Date()
+            })
+            .where(eq(campaigns.id, campaign.id));
+        }
+
+        return {
+          ...campaign,
+          status: newStatus,
+          processedLeads: processedLeads,
+          messagesSent: sentMessagesCount.count || 0,
+        };
+      })
+    );
 
     return NextResponse.json({
       success: true,
-      campaigns: allCampaigns,
+      campaigns: campaignsWithProgress,
     });
   } catch (error) {
     console.error("Get campaigns error:", error);

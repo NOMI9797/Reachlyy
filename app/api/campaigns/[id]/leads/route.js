@@ -126,13 +126,19 @@ export async function POST(request, { params }) {
       .values(newLeads)
       .returning();
 
-    // Update campaign stats
+    // Update campaign status to 'active' when first leads are added
+    const updates = {
+      updatedAt: new Date(),
+    };
+    
+    // If campaign was in draft and now has leads, make it active
+    if (campaign.status === 'draft') {
+      updates.status = 'active';
+    }
+
     await db
       .update(campaigns)
-      .set({
-        totalLeads: campaign.totalLeads + insertedLeads.length,
-        updatedAt: new Date(),
-      })
+      .set(updates)
       .where(eq(campaigns.id, campaignId));
 
     return NextResponse.json({

@@ -5,7 +5,6 @@ import toast from "react-hot-toast";
 import {
   Plus,
   Users,
-  MessageSquare,
   Calendar,
   MoreVertical,
   Play,
@@ -13,6 +12,7 @@ import {
   Edit,
   Trash2,
   Eye,
+  CheckCircle,
 } from "lucide-react";
 import CreateCampaignModal from "./CreateCampaignModal";
 
@@ -76,27 +76,31 @@ export default function CampaignsList({ onSelectCampaign }) {
     }
   };
 
-  const getStatusColor = (status) => {
+  const getStatusStyle = (status) => {
     switch (status) {
       case "draft":
-        return "badge-neutral";
+        return "bg-gray-100 text-gray-700 border-gray-200";
       case "active":
-        return "badge-success";
+        return "bg-green-100 text-green-700 border-green-200";
       case "paused":
-        return "badge-warning";
+        return "bg-yellow-100 text-yellow-700 border-yellow-200";
       case "completed":
-        return "badge-info";
+        return "bg-blue-100 text-blue-700 border-blue-200";
       default:
-        return "badge-neutral";
+        return "bg-gray-100 text-gray-700 border-gray-200";
     }
   };
 
   const getStatusIcon = (status) => {
     switch (status) {
+      case "draft":
+        return <Edit className="h-3 w-3" />;
       case "active":
         return <Play className="h-3 w-3" />;
       case "paused":
         return <Pause className="h-3 w-3" />;
+      case "completed":
+        return <CheckCircle className="h-3 w-3" />;
       default:
         return null;
     }
@@ -160,7 +164,7 @@ export default function CampaignsList({ onSelectCampaign }) {
             </div>
             <div className="stat bg-base-200 rounded-xl">
               <div className="stat-title text-base-content/60">Messages Sent</div>
-              <div className="stat-value text-warning">{campaigns?.reduce((sum, c) => sum + (c.messagesGenerated || 0), 0) || 0}</div>
+              <div className="stat-value text-warning">{campaigns?.reduce((sum, c) => sum + (c.messagesSent || 0), 0) || 0}</div>
             </div>
           </div>
         </div>
@@ -184,26 +188,26 @@ export default function CampaignsList({ onSelectCampaign }) {
             {campaigns.map((campaign) => (
               <div
                 key={campaign.id}
-                className="card bg-base-100 border border-base-300 hover:shadow-xl hover:border-primary/20 transition-all duration-300 cursor-pointer group hover:-translate-y-1"
+                className="card bg-base-100 border border-base-300 hover:shadow-lg hover:border-primary/30 transition-all duration-200 cursor-pointer group hover:-translate-y-0.5"
                 onClick={() => onSelectCampaign(campaign)}
               >
-                <div className="card-body p-6">
+                <div className="card-body p-5">
                   {/* Header */}
-                  <div className="flex items-start justify-between mb-4">
-                    <div className="flex-1 min-w-0">
-                      <h3 className="card-title text-lg text-base-content group-hover:text-primary transition-colors">
+                  <div className="flex items-start justify-between mb-3">
+                    <div className="flex-1 min-w-0 pr-2">
+                      <h3 className="card-title text-base text-base-content group-hover:text-primary transition-colors mb-1">
                         {campaign.name}
                       </h3>
                       {campaign.description && (
-                        <p className="text-sm text-base-content/60 mt-1 line-clamp-2">
+                        <p className="text-sm text-base-content/60 line-clamp-2">
                           {campaign.description}
                         </p>
                       )}
                     </div>
-                    <div className="flex items-center gap-2">
-                      <div className={`badge ${getStatusColor(campaign.status)} gap-1`}>
+                    <div className="flex items-start gap-2 flex-shrink-0">
+                      <div className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium border ${getStatusStyle(campaign.status)}`}>
                         {getStatusIcon(campaign.status)}
-                        {campaign.status}
+                        <span className="capitalize">{campaign.status}</span>
                       </div>
                       <div className="dropdown dropdown-end">
                         <button
@@ -247,15 +251,11 @@ export default function CampaignsList({ onSelectCampaign }) {
                   </div>
 
                   {/* Stats */}
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between text-sm">
-                      <div className="flex items-center gap-2 text-base-content/60">
+                  <div className="space-y-2.5">
+                    <div className="flex items-center text-sm">
+                      <div className="flex items-center gap-2 text-base-content/70">
                         <Users className="h-4 w-4" />
-                        <span>{campaign.leadsCount} leads</span>
-                      </div>
-                      <div className="flex items-center gap-2 text-base-content/60">
-                        <MessageSquare className="h-4 w-4" />
-                        <span>{campaign.messagesGenerated} messages</span>
+                        <span className="font-medium">{campaign.leadsCount} leads</span>
                       </div>
                     </div>
 
@@ -270,17 +270,17 @@ export default function CampaignsList({ onSelectCampaign }) {
                         <div className="flex justify-between text-xs text-base-content/60">
                           <span>Processing Progress</span>
                           <span className="font-semibold">
-                            {Math.round((campaign.processedLeads / campaign.leadsCount) * 100)}%
+                            {Math.round(((campaign.processedLeads || 0) / campaign.leadsCount) * 100)}%
                           </span>
                         </div>
                         <div className="relative">
                           <progress
                             className="progress progress-primary w-full h-3"
-                            value={campaign.processedLeads}
+                            value={campaign.processedLeads || 0}
                             max={campaign.leadsCount}
                           ></progress>
                           <div className="absolute inset-0 flex items-center justify-center text-xs font-semibold text-primary-content">
-                            {campaign.processedLeads}/{campaign.leadsCount}
+                            {campaign.processedLeads || 0}/{campaign.leadsCount}
                           </div>
                         </div>
                       </div>

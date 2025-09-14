@@ -91,12 +91,12 @@ export default function Sidebar({ collapsed, onToggle, activeSection = "campaign
                 href={item.href}
                 className={`btn btn-ghost w-full justify-start gap-3 h-12 ${
                   isActive 
-                    ? "btn-active bg-primary text-primary-content" 
-                    : "hover:bg-base-300"
+                    ? "bg-primary/10 text-primary border-primary/20 hover:bg-primary/15" 
+                    : "text-base-content hover:bg-base-300 hover:text-base-content"
                 } ${collapsed ? "px-2" : "px-4"}`}
               >
-                <item.icon className="h-5 w-5 flex-shrink-0" />
-                {!collapsed && <span className="truncate">{item.label}</span>}
+                <item.icon className={`h-5 w-5 flex-shrink-0 ${isActive ? "text-primary" : ""}`} />
+                {!collapsed && <span className={`truncate font-medium ${isActive ? "text-primary" : ""}`}>{item.label}</span>}
               </Link>
             );
           })}
