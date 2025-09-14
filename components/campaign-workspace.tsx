@@ -16,11 +16,9 @@ interface Lead {
   title?: string
   company?: string
   status: "pending" | "processing" | "completed" | "error"
-  profilePicture?: string
-  posts?: any[]
   addedAt: string
-  createdAt: string
-  updatedAt: string
+  posts?: any[]
+  profilePicture?: string
 }
 
 interface CampaignWorkspaceProps {

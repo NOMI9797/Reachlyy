@@ -1,9 +1,44 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { ApifyClient } from 'apify-client';
 
-export async function POST(request) {
+interface ScrapeRequestBody {
+  urls: string[];
+  limitPerSource?: number;
+  deepScrape?: boolean;
+  rawData?: boolean;
+  streamProgress?: boolean;
+}
+
+interface ApifyItem {
+  sourceUrl: string;
+  text?: string;
+  content?: string;
+  timestamp?: string;
+  time?: string;
+  postDate?: string;
+  likeCount?: number;
+  likes?: number;
+  commentCount?: number;
+  comments?: number;
+  repostCount?: number;
+  reposts?: number;
+  shares?: number;
+  postUrl?: string;
+  url?: string;
+  [key: string]: any;
+}
+
+interface ScrapeResponse {
+  items: ApifyItem[];
+  totalItems?: number;
+  completed?: boolean;
+  progress?: number;
+  message?: string;
+}
+
+export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
-    const body = await request.json();
+    const body: ScrapeRequestBody = await request.json();
     const { urls, limitPerSource = 10, deepScrape = true, rawData = false, streamProgress = false } = body || {};
 
     if (!Array.isArray(urls) || urls.length === 0) {
@@ -55,13 +90,13 @@ export async function POST(request) {
             let progressValue = 40;
             let checkCount = 0;
             
-            while (runInfo.status === 'RUNNING' || runInfo.status === 'READY') {
+            while (runInfo && (runInfo.status === 'RUNNING' || runInfo.status === 'READY')) {
               await new Promise(resolve => setTimeout(resolve, 1500)); // Check every 1.5 seconds
               runInfo = await client.run(run.id).get();
               checkCount++;
               
               // Gradually increase progress based on status and time
-              if (runInfo.status === 'RUNNING') {
+              if (runInfo && runInfo.status === 'RUNNING') {
                 progressValue = Math.min(40 + (checkCount * 8), 85); // Gradually increase to 85%
               } else {
                 progressValue = Math.min(40 + (checkCount * 4), 60); // Slower increase for READY status
@@ -69,7 +104,7 @@ export async function POST(request) {
               
               controller.enqueue(encoder.encode(`data: ${JSON.stringify({ 
                 progress: progressValue, 
-                status: `Actor ${runInfo.status.toLowerCase()}... (${checkCount * 1.5}s elapsed)` 
+                status: `Actor ${runInfo?.status?.toLowerCase() || 'unknown'}... (${checkCount * 1.5}s elapsed)` 
               })}\n\n`));
             }
             
@@ -115,10 +150,11 @@ export async function POST(request) {
             
             controller.close();
           } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
             controller.enqueue(encoder.encode(`data: ${JSON.stringify({ 
               progress: 0, 
               status: 'Error', 
-              error: error.message,
+              error: errorMessage,
               completed: true 
             })}\n\n`));
             controller.close();
@@ -126,7 +162,7 @@ export async function POST(request) {
         }
       });
 
-      return new Response(stream, {
+      return new NextResponse(stream, {
         headers: {
           'Content-Type': 'text/event-stream',
           'Cache-Control': 'no-cache',
@@ -159,7 +195,8 @@ export async function POST(request) {
     return NextResponse.json({ items: itemsWithSource, runId: run.id });
   } catch (error) {
     console.error('Scrape API error', error);
-    return NextResponse.json({ error: error?.message || 'Unknown error' }, { status: 500 });
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    return NextResponse.json({ error: errorMessage }, { status: 500 });
   }
 }
 
