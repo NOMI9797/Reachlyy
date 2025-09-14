@@ -1,1 +1,0 @@
-ALTER TABLE "messages" ALTER COLUMN "model" SET DEFAULT 'llama-3.1-70b-versatile';
