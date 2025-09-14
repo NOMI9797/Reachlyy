@@ -35,20 +35,11 @@ export async function POST(request) {
       console.log("Sample item structure:", JSON.stringify(items[0], null, 2));
     }
 
-    // Add source URL tracking to each item (exactly like Reachly)
-    const itemsWithSource = items.map((item, index) => {
-      // Try to get sourceUrl from the item first
-      if (item.sourceUrl) {
-        return { ...item, sourceUrl: item.sourceUrl };
-      }
-      
-      // Distribute items evenly across URLs
-      const sourceIndex = Math.floor(index / Math.ceil(items.length / urls.length));
-      const assignedUrl = urls[Math.min(sourceIndex, urls.length - 1)];
-      
+    // Use inputUrl from Apify response for accurate post-to-lead assignment
+    const itemsWithSource = items.map((item) => {
       return {
         ...item,
-        sourceUrl: assignedUrl
+        sourceUrl: item.inputUrl || item.sourceUrl // Use inputUrl if available, fallback to sourceUrl
       };
     });
 
