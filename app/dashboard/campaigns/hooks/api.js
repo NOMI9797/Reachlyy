@@ -130,6 +130,23 @@ export const leadApi = {
 
     return response.json();
   },
+
+  // Bulk update leads and posts (optimized)
+  bulkUpdateLeads: async ({ leadsData }) => {
+    const response = await fetch('/api/leads/bulk-update', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ leadsData }),
+    });
+    
+    if (!response.ok) {
+      throw new Error('Failed to bulk update leads');
+    }
+
+    return response.json();
+  },
 };
 
 // Message API functions
