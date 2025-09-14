@@ -5,12 +5,18 @@ import { ArrowLeft, Settings, Maximize2, Minimize2, Zap, Target, MessageSquare, 
 import LeadsColumn from "./LeadsColumn";
 import PostsColumn from "./PostsColumn";
 import AIResponseColumn from "./AIResponseColumn";
+import { useLeads } from "../hooks/useLeads";
 
 export default function CampaignWorkspace({ campaign, onBack }) {
   const [selectedLead, setSelectedLead] = useState(null);
-  const [leads, setLeads] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const {
+    leads,
+    setLeads,
+    loading,
+    error,
+    fetchLeads,
+    refreshLeads,
+  } = useLeads();
   const [columnWidths, setColumnWidths] = useState([35, 30, 35]); // percentages
   const [collapsedColumns, setCollapsedColumns] = useState(new Set());
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -31,37 +37,12 @@ export default function CampaignWorkspace({ campaign, onBack }) {
   const isDragging = useRef(false);
   const dragColumn = useRef(-1);
 
-  // Fetch leads for this campaign
-  const fetchLeads = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-
-      const response = await fetch(`/api/campaigns/${campaign.id}/leads`);
-      const result = await response.json();
-
-      if (result.success) {
-        setLeads(result.leads);
-      } else {
-        setError(result.message || "Failed to fetch leads");
-      }
-    } catch (err) {
-      setError("Failed to fetch leads");
-      console.error("Error fetching leads:", err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
+  // Fetch leads when campaign changes
   useEffect(() => {
     if (campaign?.id) {
-      fetchLeads();
+      fetchLeads(campaign.id);
     }
-  }, [campaign?.id]);
-
-  const refreshLeads = () => {
-    fetchLeads();
-  };
+  }, [campaign?.id, fetchLeads]);
 
   // Column resizing logic
   const handleMouseDown = (columnIndex) => (e) => {

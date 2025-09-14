@@ -3,8 +3,8 @@
 import { useState, useEffect } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import CampaignsList from "@/components/campaigns/CampaignsList";
-import CampaignWorkspace from "@/components/campaigns/CampaignWorkspace";
+import CampaignsList from "@/app/dashboard/campaigns/components/CampaignsList";
+import CampaignWorkspace from "@/app/dashboard/campaigns/components/CampaignWorkspace";
 import Sidebar from "@/components/layout/Sidebar";
 import TopBar from "@/components/layout/TopBar";
 

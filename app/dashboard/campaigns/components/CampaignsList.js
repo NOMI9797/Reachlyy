@@ -1,7 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import toast from "react-hot-toast";
+import { useState } from "react";
 import {
   Plus,
   Users,
@@ -13,66 +12,34 @@ import {
   Trash2,
   Eye,
   CheckCircle,
+  MessageSquare,
 } from "lucide-react";
 import CreateCampaignModal from "./CreateCampaignModal";
+import { useCampaigns } from "../hooks/useCampaigns";
 
 export default function CampaignsList({ onSelectCampaign }) {
-  const [campaigns, setCampaigns] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const {
+    campaigns,
+    setCampaigns,
+    loading,
+    error,
+    setError,
+    createCampaign,
+    deleteCampaign,
+    refreshCampaigns,
+  } = useCampaigns();
+  
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showMenu, setShowMenu] = useState(null);
   const [deletingCampaign, setDeletingCampaign] = useState(null);
 
-  // Fetch campaigns from API
-  const fetchCampaigns = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const response = await fetch("/api/campaigns");
-      const result = await response.json();
-
-      if (result.success) {
-        setCampaigns(result.campaigns);
-      } else {
-        setError(result.message || "Failed to fetch campaigns");
-      }
-    } catch (err) {
-      setError("Failed to fetch campaigns");
-      console.error("Error fetching campaigns:", err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchCampaigns();
-  }, []);
-
   const handleCreateCampaign = async (campaignData) => {
     try {
-      const response = await fetch("/api/campaigns", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(campaignData),
-      });
-
-      const result = await response.json();
-
-      if (result.success) {
-        setCampaigns([result.campaign, ...campaigns]);
-        setShowCreateModal(false);
-        onSelectCampaign(result.campaign);
-        toast.success("Campaign created successfully!");
-      } else {
-        setError(result.message || "Failed to create campaign");
-        toast.error(result.message || "Failed to create campaign");
-      }
+      const newCampaign = await createCampaign(campaignData);
+      setShowCreateModal(false);
+      onSelectCampaign(newCampaign);
     } catch (err) {
-      setError("Failed to create campaign");
-      toast.error("Failed to create campaign");
+      // Error handling is done in the hook
       console.error("Error creating campaign:", err);
     }
   };
@@ -87,22 +54,10 @@ export default function CampaignsList({ onSelectCampaign }) {
 
     setDeletingCampaign(campaignId);
     try {
-      const response = await fetch(`/api/campaigns/${campaignId}`, {
-        method: "DELETE",
-      });
-
-      const result = await response.json();
-
-      if (result.success) {
-        // Remove campaign from state
-        setCampaigns(campaigns.filter(campaign => campaign.id !== campaignId));
-        setShowMenu(null);
-        toast.success("Campaign deleted successfully!");
-      } else {
-        toast.error(result.error || "Failed to delete campaign");
-      }
+      await deleteCampaign(campaignId, campaignName);
+      setShowMenu(null);
     } catch (err) {
-      toast.error("Failed to delete campaign");
+      // Error handling is done in the hook
       console.error("Error deleting campaign:", err);
     } finally {
       setDeletingCampaign(null);
@@ -209,7 +164,7 @@ export default function CampaignsList({ onSelectCampaign }) {
               <h3 className="font-bold">Error</h3>
               <div className="text-xs">{error}</div>
             </div>
-            <button className="btn btn-sm btn-ghost" onClick={fetchCampaigns}>
+            <button className="btn btn-sm btn-ghost" onClick={refreshCampaigns}>
               Try Again
             </button>
           </div>
