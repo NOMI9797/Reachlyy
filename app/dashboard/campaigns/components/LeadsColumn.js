@@ -136,12 +136,12 @@ const LeadsColumn = memo(function LeadsColumn({
 
   const handleRunSelected = async () => {
     if (!selectedLead) return;
-    await scrapeLead(selectedLead, scrapingSettings, leads, setLeads);
+    await scrapeLead(selectedLead, scrapingSettings, leads, setLeads, campaignId);
   };
 
   const handleRunAll = async () => {
     const pendingLeads = leads.filter(lead => lead.status === "pending" || lead.status === "error");
-    await scrapeMultipleLeads(pendingLeads, scrapingSettings, leads, setLeads);
+    await scrapeMultipleLeads(pendingLeads, scrapingSettings, leads, setLeads, campaignId);
   };
 
   const getStatusIcon = (status) => {

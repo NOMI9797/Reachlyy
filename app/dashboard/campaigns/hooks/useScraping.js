@@ -80,13 +80,36 @@ export function useScraping() {
   // Process scraped data and update lead
   const processScrapedData = useCallback(async (leadId, items, leads, setLeads, leadUrl, campaignId = null) => {
     try {
+      // Update progress: Processing data
+      setScrapingProgress(prev => ({
+        ...prev,
+        [leadId]: {
+          status: 'processing',
+          progress: 60,
+          message: 'Processing scraped data...'
+        }
+      }));
+
+      // Small delay to make progress visible
+      await new Promise(resolve => setTimeout(resolve, 300));
+
       // Process scraped data exactly like Reachly
       const { extractLeadInfo, cleanScrapedPosts } = await import('@/libs/scraping-utils');
       const cleanedPosts = cleanScrapedPosts(items);
       const leadInfo = extractLeadInfo(cleanedPosts);
       
       console.log("Extracted lead info:", leadInfo);
-      console.log("Profile picture URL:", leadInfo.profilePicture);
+      console.log("Cleaned posts count:", cleanedPosts.length);
+
+      // Update progress: Saving posts
+      setScrapingProgress(prev => ({
+        ...prev,
+        [leadId]: {
+          status: 'processing',
+          progress: 75,
+          message: 'Saving posts to database...'
+        }
+      }));
 
       // Save posts to database using mutation
       try {
@@ -94,6 +117,16 @@ export function useScraping() {
       } catch (error) {
         console.warn('Failed to save posts, continuing...');
       }
+
+      // Update progress: Updating lead
+      setScrapingProgress(prev => ({
+        ...prev,
+        [leadId]: {
+          status: 'processing',
+          progress: 90,
+          message: 'Updating lead information...'
+        }
+      }));
 
       // Update lead in database using mutation
       const updateData = {
@@ -111,6 +144,7 @@ export function useScraping() {
         console.warn('Failed to update lead, continuing...');
       }
 
+      // Update progress: Completed
       setScrapingProgress(prev => ({
         ...prev,
         [leadId]: {
@@ -179,6 +213,16 @@ export function useScraping() {
     setLeads(updatedLeads);
 
     try {
+      // Update progress: Scraping started
+      setScrapingProgress(prev => ({
+        ...prev,
+        [leadId]: {
+          status: 'processing',
+          progress: 10,
+          message: 'Scraping LinkedIn profile...'
+        }
+      }));
+
       const result = await scrapingMutation.mutateAsync({
         urls: [lead.url],
         limitPerSource: scrapingSettings?.limitPerSource ?? 10,
@@ -186,6 +230,20 @@ export function useScraping() {
         rawData: scrapingSettings?.rawData ?? false,
         streamProgress: false
       });
+
+
+      // Update progress: Data received
+      setScrapingProgress(prev => ({
+        ...prev,
+        [leadId]: {
+          status: 'processing',
+          progress: 50,
+          message: `Received ${result.items?.length || 0} items, processing...`
+        }
+      }));
+
+      // Small delay to make progress visible
+      await new Promise(resolve => setTimeout(resolve, 500));
 
       if (result.items && result.items.length > 0) {
         const { leadInfo, cleanedPosts } = await processScrapedData(

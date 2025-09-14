@@ -215,7 +215,7 @@ export const scrapingApi = {
 
     const result = await response.json();
 
-    if (!result.success) {
+    if (!response.ok) {
       throw new Error(result.error || "Failed to scrape profiles");
     }
 
