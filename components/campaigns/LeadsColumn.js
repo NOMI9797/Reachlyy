@@ -16,7 +16,6 @@ import {
   Settings,
   Link,
   User,
-  Building,
   MapPin,
 } from "lucide-react";
 
@@ -614,11 +613,11 @@ const LeadsColumn = memo(function LeadsColumn({
         </div>
 
         {/* Action Buttons */}
-        <div className="flex gap-2 mb-3">
+        <div className="grid grid-cols-2 gap-2 mb-3">
           <button
             onClick={handleRunSelected}
             disabled={!selectedLead || isProcessing}
-            className="btn btn-primary btn-sm flex-1 gap-1"
+            className="btn btn-primary btn-sm gap-1"
           >
             <Play className="h-3 w-3" />
             Run Selected
@@ -626,28 +625,21 @@ const LeadsColumn = memo(function LeadsColumn({
           <button
             onClick={handleRunAll}
             disabled={isProcessing || leads.filter(lead => lead.status === "pending" || lead.status === "error").length === 0}
-            className="btn btn-secondary btn-sm flex-1 gap-1"
+            className="btn btn-secondary btn-sm gap-1"
           >
             <Play className="h-3 w-3" />
             Run All
           </button>
-        </div>
-        
-        <div className="flex gap-2 mb-3">
           <button
             onClick={() => setShowAddForm(!showAddForm)}
-            className="btn btn-outline btn-sm flex-1 gap-1"
+            className="btn btn-outline btn-sm gap-1"
           >
             <Plus className="h-3 w-3" />
             Add URLs
           </button>
-        </div>
-
-        {/* Import CSV */}
-        <div className="flex gap-2 mb-3">
           <button
             onClick={handleImportCSV}
-            className="btn btn-outline btn-sm flex-1 gap-1"
+            className="btn btn-outline btn-sm gap-1"
           >
             <Upload className="h-3 w-3" />
             Import CSV
@@ -751,13 +743,6 @@ const LeadsColumn = memo(function LeadsColumn({
                         <div className="flex items-center gap-1 text-xs text-base-content/60 mb-1">
                           <User className="h-3 w-3" />
                           <span className="truncate">{lead.title}</span>
-                        </div>
-                      )}
-
-                      {lead.company && (
-                        <div className="flex items-center gap-1 text-xs text-base-content/60 mb-1">
-                          <Building className="h-3 w-3" />
-                          <span className="truncate">{lead.company}</span>
                         </div>
                       )}
 
