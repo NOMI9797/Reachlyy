@@ -22,6 +22,7 @@ export default function CampaignsList({ onSelectCampaign }) {
   const [error, setError] = useState(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showMenu, setShowMenu] = useState(null);
+  const [deletingCampaign, setDeletingCampaign] = useState(null);
 
   // Fetch campaigns from API
   const fetchCampaigns = async () => {
@@ -73,6 +74,38 @@ export default function CampaignsList({ onSelectCampaign }) {
       setError("Failed to create campaign");
       toast.error("Failed to create campaign");
       console.error("Error creating campaign:", err);
+    }
+  };
+
+  const handleDeleteCampaign = async (campaignId, campaignName) => {
+    // Show confirmation dialog
+    const confirmed = window.confirm(
+      `Are you sure you want to delete "${campaignName}"?\n\nThis will permanently delete:\n• The campaign\n• All associated leads\n• All generated messages\n\nThis action cannot be undone.`
+    );
+    
+    if (!confirmed) return;
+
+    setDeletingCampaign(campaignId);
+    try {
+      const response = await fetch(`/api/campaigns/${campaignId}`, {
+        method: "DELETE",
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        // Remove campaign from state
+        setCampaigns(campaigns.filter(campaign => campaign.id !== campaignId));
+        setShowMenu(null);
+        toast.success("Campaign deleted successfully!");
+      } else {
+        toast.error(result.error || "Failed to delete campaign");
+      }
+    } catch (err) {
+      toast.error("Failed to delete campaign");
+      console.error("Error deleting campaign:", err);
+    } finally {
+      setDeletingCampaign(null);
     }
   };
 
@@ -239,9 +272,25 @@ export default function CampaignsList({ onSelectCampaign }) {
                               </button>
                             </li>
                             <li>
-                              <button className="gap-2 text-error">
-                                <Trash2 className="h-4 w-4" />
-                                Delete
+                              <button 
+                                className={`gap-2 text-error ${deletingCampaign === campaign.id ? 'loading' : ''}`}
+                                disabled={deletingCampaign === campaign.id}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDeleteCampaign(campaign.id, campaign.name);
+                                }}
+                              >
+                                {deletingCampaign === campaign.id ? (
+                                  <>
+                                    <span className="loading loading-spinner loading-xs"></span>
+                                    Deleting...
+                                  </>
+                                ) : (
+                                  <>
+                                    <Trash2 className="h-4 w-4" />
+                                    Delete
+                                  </>
+                                )}
                               </button>
                             </li>
                           </ul>
