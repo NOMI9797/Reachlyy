@@ -42,6 +42,21 @@ export const posts = pgTable('posts', {
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 
+// Messages table - for storing generated messages
+export const messages = pgTable('messages', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  leadId: uuid('lead_id').references(() => leads.id, { onDelete: 'cascade' }).notNull(),
+  campaignId: uuid('campaign_id').references(() => campaigns.id, { onDelete: 'cascade' }).notNull(),
+  content: text('content').notNull(),
+  model: varchar('model', { length: 50 }).notNull().default('llama-3.1-8b-instant'),
+  customPrompt: text('custom_prompt'),
+  postsAnalyzed: integer('posts_analyzed').default(3),
+  status: varchar('status', { length: 20 }).notNull().default('draft'), // draft, sent, scheduled
+  sentAt: timestamp('sent_at'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
 
 
 // Database initialization function

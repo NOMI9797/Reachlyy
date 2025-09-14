@@ -1,0 +1,1 @@
+ALTER TABLE "messages" ALTER COLUMN "model" SET DEFAULT 'llama3-70b-8192';

@@ -201,6 +201,7 @@ export function CampaignWorkspace({ campaign, onBack }: CampaignWorkspaceProps) 
         >
           <AIResponseColumn
             selectedLead={selectedLead}
+            campaignId={campaign?.id}
             collapsed={collapsedColumns.has(2)}
             onToggleCollapse={() => toggleColumn(2)}
           />

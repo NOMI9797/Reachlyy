@@ -1,72 +1,223 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { ChevronLeft, ChevronRight, Wand2, Copy, RefreshCw, Settings, Loader2, Sparkles } from "lucide-react"
+import { ChevronLeft, ChevronRight, Wand2, Copy, RefreshCw, Settings, Loader2, Sparkles, Trash2, Check } from "lucide-react"
 
 interface AIResponseColumnProps {
   selectedLead: any
+  campaignId?: string
   collapsed: boolean
   onToggleCollapse: () => void
 }
 
-export function AIResponseColumn({ selectedLead, collapsed, onToggleCollapse }: AIResponseColumnProps) {
-  const [selectedModel, setSelectedModel] = useState("gpt-4")
+export function AIResponseColumn({ selectedLead, campaignId, collapsed, onToggleCollapse }: AIResponseColumnProps) {
+  const [selectedModel, setSelectedModel] = useState("llama-3.1-8b-instant")
   const [customPrompt, setCustomPrompt] = useState("")
   const [generatedMessage, setGeneratedMessage] = useState("")
   const [isGenerating, setIsGenerating] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const [messageHistory, setMessageHistory] = useState<Array<{ id: string; message: string; timestamp: string }>>([])
+  const [copiedStates, setCopiedStates] = useState<Set<string>>(new Set())
 
   const models = [
-    { value: "gpt-4", label: "GPT-4", description: "Most capable, best for complex tasks" },
-    { value: "gpt-3.5-turbo", label: "GPT-3.5 Turbo", description: "Fast and efficient" },
-    { value: "claude-3", label: "Claude 3", description: "Great for creative writing" },
-    { value: "gemini-pro", label: "Gemini Pro", description: "Google's latest model" },
+    { value: "llama-3.1-8b-instant", label: "Llama 3.1 8B", description: "Fast and efficient" },
+    { value: "llama3-8b-8192", label: "Llama 3 8B", description: "Alternative fast model" },
+    { value: "mixtral-8x7b-32768", label: "Mixtral 8x7B", description: "Balanced performance" },
+    { value: "gemma-7b-it", label: "Gemma 7B", description: "Good for creative tasks" },
   ]
 
+  const loadMessageHistory = useCallback(async () => {
+    if (!selectedLead?.id || !campaignId) return
+    
+    try {
+      const response = await fetch(`/api/messages/generate?leadId=${selectedLead.id}&campaignId=${campaignId}`)
+      const result = await response.json()
+      
+      if (result.success) {
+        if (result.data.length > 0) {
+          // Load the most recent message
+          const latestMessage = result.data[0]
+          setGeneratedMessage(latestMessage.content)
+          
+          // Load message history
+          const history = result.data.slice(0, 5).map((msg: any) => ({
+            id: msg.id,
+            message: msg.content,
+            timestamp: new Date(msg.createdAt).toISOString(),
+          }))
+          setMessageHistory(history)
+        } else {
+          // No messages for this lead
+          setGeneratedMessage("")
+          setMessageHistory([])
+        }
+      } else {
+        setGeneratedMessage("")
+        setMessageHistory([])
+      }
+    } catch (error) {
+      console.error('Error loading message history:', error)
+      setGeneratedMessage("")
+      setMessageHistory([])
+    }
+  }, [selectedLead?.id, campaignId])
+
+  // Load message history when lead changes
+  useEffect(() => {
+    // Clear previous messages immediately when lead changes
+    setMessageHistory([])
+    setGeneratedMessage("")
+    setCopiedStates(new Set())
+    
+    if (selectedLead?.id && campaignId) {
+      loadMessageHistory()
+    }
+  }, [selectedLead?.id, campaignId, loadMessageHistory])
+
   const generateMessage = async () => {
-    if (!selectedLead) return
+    if (!selectedLead || !campaignId) return
 
     setIsGenerating(true)
+    try {
+      const response = await fetch('/api/messages/generate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          leadId: selectedLead.id,
+          campaignId,
+          model: selectedModel,
+          customPrompt,
+        }),
+      })
 
-    // Simulate AI generation
-    await new Promise((resolve) => setTimeout(resolve, 2000))
+      const result = await response.json()
 
-    const mockMessages = [
-      `Hi ${selectedLead.name || "there"}! I noticed your recent post about API optimization - reducing response time by 40% is impressive! I've been working on similar performance improvements and would love to connect and share insights about scalable architecture patterns.`,
-
-      `Hello ${selectedLead.name || "there"}! Your reflection on 2023 resonated with me, especially the point about mentoring junior developers. I'm also passionate about knowledge sharing and would be interested in discussing best practices for technical mentorship.`,
-
-      `Hi ${selectedLead.name || "there"}! Completely agree with your take on documentation - future you will definitely thank present you! I've implemented some interesting documentation strategies that have saved countless hours. Would love to connect and exchange ideas.`,
-    ]
-
-    const randomMessage = mockMessages[Math.floor(Math.random() * mockMessages.length)]
-    setGeneratedMessage(randomMessage)
-
-    // Add to history
-    const newMessage = {
-      id: Date.now().toString(),
-      message: randomMessage,
-      timestamp: new Date().toISOString(),
+      if (result.success) {
+        const message = result.data.content
+        setGeneratedMessage(message)
+        
+        // Add to history but don't duplicate the current message
+        const newMessage = {
+          id: result.data.message.id,
+          message,
+          timestamp: new Date().toISOString(),
+        }
+        // Only add to history, don't show in both places
+        setMessageHistory((prev) => [newMessage, ...prev])
+      } else {
+        // Show error message
+        setGeneratedMessage(`Error: ${result.message || 'Failed to generate message'}`)
+      }
+    } catch (error) {
+      console.error('Error generating message:', error)
+      setGeneratedMessage('Error: Failed to connect to message generation service')
+    } finally {
+      setIsGenerating(false)
     }
-    setMessageHistory((prev) => [newMessage, ...prev])
-
-    setIsGenerating(false)
   }
 
-  const copyToClipboard = async (text: string) => {
+  const copyToClipboard = async (text: string, messageId?: string) => {
+    const id = messageId || 'current'
+    
     try {
-      await navigator.clipboard.writeText(text)
-      // Could add a toast notification here
+      // Try modern clipboard API first
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text)
+        console.log('Text copied to clipboard successfully')
+        
+        // Show visual feedback
+        setCopiedStates(prev => new Set(prev).add(id))
+        setTimeout(() => {
+          setCopiedStates(prev => {
+            const newSet = new Set(prev)
+            newSet.delete(id)
+            return newSet
+          })
+        }, 2000)
+        return
+      }
+      
+      // Fallback for older browsers or non-secure contexts
+      const textArea = document.createElement('textarea')
+      textArea.value = text
+      textArea.style.position = 'fixed'
+      textArea.style.left = '-999999px'
+      textArea.style.top = '-999999px'
+      document.body.appendChild(textArea)
+      textArea.focus()
+      textArea.select()
+      
+      try {
+        document.execCommand('copy')
+        console.log('Text copied to clipboard using fallback method')
+        
+        // Show visual feedback
+        setCopiedStates(prev => new Set(prev).add(id))
+        setTimeout(() => {
+          setCopiedStates(prev => {
+            const newSet = new Set(prev)
+            newSet.delete(id)
+            return newSet
+          })
+        }, 2000)
+      } catch (err) {
+        console.error('Fallback copy failed:', err)
+        alert('Failed to copy text. Please select and copy manually.')
+      } finally {
+        document.body.removeChild(textArea)
+      }
     } catch (err) {
       console.error("Failed to copy text: ", err)
+      alert('Failed to copy text. Please select and copy manually.')
     }
+  }
+
+  const deleteMessage = async (messageId: string) => {
+    try {
+      const response = await fetch(`/api/messages/${messageId}`, {
+        method: 'DELETE',
+      })
+
+      const result = await response.json()
+
+      if (result.success) {
+        // Check if we're deleting the current message (first in history)
+        const isCurrentMessage = messageHistory.length > 0 && messageHistory[0].id === messageId
+        
+        // Remove from message history
+        setMessageHistory(prev => prev.filter(msg => msg.id !== messageId))
+        
+        // If this was the current message, clear it and potentially show the next one
+        if (isCurrentMessage) {
+          const remainingMessages = messageHistory.filter(msg => msg.id !== messageId)
+          if (remainingMessages.length > 0) {
+            // Show the next most recent message as current
+            setGeneratedMessage(remainingMessages[0].message)
+          } else {
+            // No more messages, clear current
+            setGeneratedMessage("")
+          }
+        }
+      } else {
+        console.error('Failed to delete message:', result.message)
+      }
+    } catch (error) {
+      console.error('Error deleting message:', error)
+    }
+  }
+
+  const clearCurrentMessage = () => {
+    setGeneratedMessage("")
+    // If there are previous messages, we might want to show the next most recent one
+    // For now, just clear the current message display
   }
 
   if (collapsed) {
@@ -172,13 +323,28 @@ export function AIResponseColumn({ selectedLead, collapsed, onToggleCollapse }: 
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => copyToClipboard(generatedMessage)}
-                        className="p-1"
+                        onClick={() => copyToClipboard(generatedMessage, 'current')}
+                        className={`p-1 transition-all duration-200 ${
+                          copiedStates.has('current') 
+                            ? 'text-green-600 bg-green-50 dark:text-green-400 dark:bg-green-900/20' 
+                            : ''
+                        }`}
+                        title={copiedStates.has('current') ? "Copied!" : "Copy message"}
                       >
-                        <Copy className="h-3 w-3" />
+                        {copiedStates.has('current') ? (
+                          <Check className="h-3 w-3" />
+                        ) : (
+                          <Copy className="h-3 w-3" />
+                        )}
                       </Button>
-                      <Button variant="ghost" size="sm" onClick={generateMessage} className="p-1">
-                        <RefreshCw className="h-3 w-3" />
+                      <Button 
+                        variant="ghost" 
+                        size="sm" 
+                        onClick={clearCurrentMessage} 
+                        className="p-1 text-destructive hover:text-destructive"
+                        title="Delete message"
+                      >
+                        <Trash2 className="h-3 w-3" />
                       </Button>
                     </div>
                   </div>
@@ -194,14 +360,14 @@ export function AIResponseColumn({ selectedLead, collapsed, onToggleCollapse }: 
             )}
 
             {/* Message History */}
-            {messageHistory.length > 0 && (
+            {messageHistory.length > 1 && (
               <div className="space-y-3">
                 <div className="flex items-center gap-2">
                   <h3 className="text-sm font-medium text-foreground">Previous Messages</h3>
-                  <Badge variant="secondary">{messageHistory.length}</Badge>
+                  <Badge variant="secondary">{messageHistory.length - 1}</Badge>
                 </div>
 
-                {messageHistory.map((item) => (
+                {messageHistory.slice(1).map((item) => (
                   <Card key={item.id} className="bg-muted/30">
                     <CardContent className="p-3">
                       <div className="text-sm leading-relaxed mb-2">{item.message}</div>
@@ -209,9 +375,34 @@ export function AIResponseColumn({ selectedLead, collapsed, onToggleCollapse }: 
                         <span className="text-xs text-muted-foreground">
                           {new Date(item.timestamp).toLocaleTimeString()}
                         </span>
-                        <Button variant="ghost" size="sm" onClick={() => copyToClipboard(item.message)} className="p-1">
-                          <Copy className="h-3 w-3" />
-                        </Button>
+                        <div className="flex gap-1">
+                          <Button 
+                            variant="ghost" 
+                            size="sm" 
+                            onClick={() => copyToClipboard(item.message, item.id)} 
+                            className={`p-1 transition-all duration-200 ${
+                              copiedStates.has(item.id) 
+                                ? 'text-green-600 bg-green-50 dark:text-green-400 dark:bg-green-900/20' 
+                                : ''
+                            }`}
+                            title={copiedStates.has(item.id) ? "Copied!" : "Copy message"}
+                          >
+                            {copiedStates.has(item.id) ? (
+                              <Check className="h-3 w-3" />
+                            ) : (
+                              <Copy className="h-3 w-3" />
+                            )}
+                          </Button>
+                          <Button 
+                            variant="ghost" 
+                            size="sm" 
+                            onClick={() => deleteMessage(item.id)} 
+                            className="p-1 text-destructive hover:text-destructive"
+                            title="Delete message"
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
+                        </div>
                       </div>
                     </CardContent>
                   </Card>
