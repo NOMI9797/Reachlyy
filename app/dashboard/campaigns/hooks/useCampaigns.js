@@ -41,6 +41,23 @@ export function useCampaigns() {
     },
   });
 
+  // Update campaign mutation
+  const updateCampaignMutation = useMutation({
+    mutationFn: campaignApi.updateCampaign,
+    onSuccess: (updatedCampaign) => {
+      // Update the cache
+      queryClient.setQueryData(campaignKeys.lists(), (oldCampaigns = []) =>
+        oldCampaigns.map(campaign => 
+          campaign.id === updatedCampaign.id ? updatedCampaign : campaign
+        )
+      );
+      toast.success("Campaign updated successfully!");
+    },
+    onError: (error) => {
+      toast.error(error.message || "Failed to update campaign");
+    },
+  });
+
   // Delete campaign mutation
   const deleteCampaignMutation = useMutation({
     mutationFn: campaignApi.deleteCampaign,
@@ -61,6 +78,11 @@ export function useCampaigns() {
   // Create campaign function
   const createCampaign = async (campaignData) => {
     return createCampaignMutation.mutateAsync(campaignData);
+  };
+
+  // Update campaign function
+  const updateCampaign = async (campaignId, updateData) => {
+    return updateCampaignMutation.mutateAsync({ campaignId, updateData });
   };
 
   // Delete campaign function
@@ -93,10 +115,12 @@ export function useCampaigns() {
     setError,
     fetchCampaigns,
     createCampaign,
+    updateCampaign,
     deleteCampaign,
     refreshCampaigns,
     // Additional React Query specific properties
     isCreating: createCampaignMutation.isPending,
+    isUpdating: updateCampaignMutation.isPending,
     isDeleting: deleteCampaignMutation.isPending,
   };
 }
