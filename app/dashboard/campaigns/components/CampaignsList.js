@@ -15,6 +15,7 @@ import {
   MessageSquare,
 } from "lucide-react";
 import CreateCampaignModal from "./CreateCampaignModal";
+import EditCampaignModal from "./EditCampaignModal";
 import { useCampaigns } from "../hooks/useCampaigns";
 
 export default function CampaignsList({ onSelectCampaign }) {
@@ -25,11 +26,14 @@ export default function CampaignsList({ onSelectCampaign }) {
     error,
     setError,
     createCampaign,
+    updateCampaign,
     deleteCampaign,
     refreshCampaigns,
   } = useCampaigns();
   
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editingCampaign, setEditingCampaign] = useState(null);
   const [showMenu, setShowMenu] = useState(null);
   const [deletingCampaign, setDeletingCampaign] = useState(null);
 
@@ -42,6 +46,23 @@ export default function CampaignsList({ onSelectCampaign }) {
       // Error handling is done in the hook
       console.error("Error creating campaign:", err);
     }
+  };
+
+  const handleEditCampaign = async (campaignId, updateData) => {
+    try {
+      await updateCampaign(campaignId, updateData);
+      setShowEditModal(false);
+      setEditingCampaign(null);
+    } catch (err) {
+      // Error handling is done in the hook
+      console.error("Error updating campaign:", err);
+    }
+  };
+
+  const handleOpenEditModal = (campaign) => {
+    setEditingCampaign(campaign);
+    setShowEditModal(true);
+    setShowMenu(null); // Close the dropdown menu
   };
 
   const handleDeleteCampaign = async (campaignId, campaignName) => {
@@ -221,7 +242,13 @@ export default function CampaignsList({ onSelectCampaign }) {
                               </button>
                             </li>
                             <li>
-                              <button className="gap-2">
+                              <button 
+                                className="gap-2"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleOpenEditModal(campaign);
+                                }}
+                              >
                                 <Edit className="h-4 w-4" />
                                 Edit
                               </button>
@@ -322,6 +349,17 @@ export default function CampaignsList({ onSelectCampaign }) {
         open={showCreateModal}
         onClose={() => setShowCreateModal(false)}
         onSubmit={handleCreateCampaign}
+      />
+
+      {/* Edit Campaign Modal */}
+      <EditCampaignModal
+        open={showEditModal}
+        onClose={() => {
+          setShowEditModal(false);
+          setEditingCampaign(null);
+        }}
+        onSubmit={handleEditCampaign}
+        campaign={editingCampaign}
       />
     </div>
   );

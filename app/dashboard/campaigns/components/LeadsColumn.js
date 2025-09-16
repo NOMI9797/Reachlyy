@@ -17,8 +17,145 @@ import {
   User,
   MapPin,
 } from "lucide-react";
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core';
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import {
+  useSortable,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { useLeads } from "../hooks/useLeads";
 import { useScraping } from "../hooks/useScraping";
+
+// Sortable Lead Item Component
+function SortableLeadItem({ lead, isSelected, onSelect, getDisplayName, getStatusIcon, getStatusColor, scrapingProgress }) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: lead._id || lead.id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      {...attributes}
+      {...listeners}
+      className={`card bg-base-100 border border-base-300 cursor-grab active:cursor-grabbing transition-all hover:shadow-sm ${
+        isSelected
+          ? "ring-2 ring-primary bg-primary/5"
+          : "hover:bg-base-200"
+      } ${isDragging ? "z-50" : ""}`}
+      onClick={(e) => {
+        // Only select if not dragging
+        if (!isDragging) {
+          onSelect(lead);
+        }
+      }}
+      title="Drag to reorder or click to select"
+    >
+      <div className="card-body p-3">
+        <div className="flex items-start gap-3">
+          {/* Profile Picture or Status Icon */}
+          {lead.profilePicture ? (
+            <div className="avatar">
+              <div className="w-8 h-8 rounded-full">
+                <img 
+                  src={lead.profilePicture} 
+                  alt={getDisplayName(lead)}
+                  className="w-full h-full object-cover"
+                  onError={(e) => {
+                    // Fallback to initials if image fails to load
+                    e.target.style.display = 'none';
+                    e.target.nextSibling.style.display = 'flex';
+                  }}
+                />
+                <div 
+                  className="w-full h-full bg-primary text-primary-content rounded-full flex items-center justify-center text-xs font-medium"
+                  style={{ display: 'none' }}
+                >
+                  {getDisplayName(lead).split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="w-8 h-8 rounded-full bg-primary text-primary-content flex items-center justify-center text-xs font-medium">
+              {lead.status === 'processing' ? (
+                <div className="loading loading-spinner loading-xs"></div>
+              ) : (
+                getDisplayName(lead).split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
+              )}
+            </div>
+          )}
+
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 mb-1">
+              <h4 className="font-semibold text-sm text-base-content truncate">
+                {getDisplayName(lead)}
+              </h4>
+              <div className={`badge badge-sm ${getStatusColor(lead.status)}`}>
+                {lead.status}
+              </div>
+            </div>
+
+            {lead.title && (
+              <div className="flex items-center gap-1 text-xs text-base-content/60 mb-1">
+                <User className="h-3 w-3" />
+                <span className="truncate">{lead.title}</span>
+              </div>
+            )}
+
+            {lead.location && (
+              <div className="flex items-center gap-1 text-xs text-base-content/60 mb-1">
+                <MapPin className="h-3 w-3" />
+                <span className="truncate">{lead.location}</span>
+              </div>
+            )}
+
+            <p className="text-xs text-base-content/40 truncate mt-1">
+              {lead.url}
+            </p>
+
+            {/* Progress Bar for Processing Leads */}
+            {lead.status === "processing" && scrapingProgress[lead._id || lead.id] && (
+              <div className="mt-2 space-y-1">
+                <div className="flex justify-between text-xs text-base-content/60">
+                  <span>{scrapingProgress[lead._id || lead.id].message}</span>
+                  <span>{scrapingProgress[lead._id || lead.id].progress}%</span>
+                </div>
+                <progress
+                  className="progress progress-primary w-full h-1"
+                  value={scrapingProgress[lead._id || lead.id].progress}
+                  max="100"
+                ></progress>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 const LeadsColumn = memo(function LeadsColumn({
   leads,
@@ -46,6 +183,31 @@ const LeadsColumn = memo(function LeadsColumn({
   const [showAddForm, setShowAddForm] = useState(false);
   const [newUrls, setNewUrls] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
+
+  // Drag and drop sensors
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8, // Require 8px of movement before drag starts
+      },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
+
+  // Handle drag end
+  const handleDragEnd = (event) => {
+    const { active, over } = event;
+
+    if (active.id !== over?.id) {
+      const oldIndex = leads.findIndex(lead => (lead._id || lead.id) === active.id);
+      const newIndex = leads.findIndex(lead => (lead._id || lead.id) === over.id);
+
+      const newLeads = arrayMove(leads, oldIndex, newIndex);
+      setLeads(newLeads);
+    }
+  };
 
   const getDisplayName = (lead) => {
     if (lead.name) return lead.name;
@@ -286,7 +448,7 @@ const LeadsColumn = memo(function LeadsColumn({
         </div>
       )}
 
-      {/* Leads List */}
+      {/* Leads List with Drag and Drop */}
       <div className="flex-1 overflow-y-auto">
         {filteredLeads.length === 0 ? (
           <div className="p-4 text-center text-base-content/60">
@@ -295,99 +457,31 @@ const LeadsColumn = memo(function LeadsColumn({
             <p className="text-xs">Add LinkedIn URLs to get started</p>
           </div>
         ) : (
-          <div className="p-2 space-y-2">
-            {filteredLeads.map((lead) => (
-              <div
-                key={lead._id || lead.id}
-                className={`card bg-base-100 border border-base-300 cursor-pointer transition-all hover:shadow-sm ${
-                  (selectedLead?._id || selectedLead?.id) === (lead._id || lead.id)
-                    ? "ring-2 ring-primary bg-primary/5"
-                    : "hover:bg-base-200"
-                }`}
-                onClick={() => onSelectLead(lead)}
-              >
-                <div className="card-body p-3">
-                  <div className="flex items-start gap-3">
-                    {/* Profile Picture or Status Icon */}
-                    {lead.profilePicture ? (
-                      <div className="avatar">
-                        <div className="w-8 h-8 rounded-full">
-                          <img 
-                            src={lead.profilePicture} 
-                            alt={getDisplayName(lead)}
-                            className="w-full h-full object-cover"
-                            onError={(e) => {
-                              // Fallback to initials if image fails to load
-                              e.target.style.display = 'none';
-                              e.target.nextSibling.style.display = 'flex';
-                            }}
-                          />
-                          <div 
-                            className="w-full h-full bg-primary text-primary-content rounded-full flex items-center justify-center text-xs font-medium"
-                            style={{ display: 'none' }}
-                          >
-                            {getDisplayName(lead).split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)}
-                          </div>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="w-8 h-8 rounded-full bg-primary text-primary-content flex items-center justify-center text-xs font-medium">
-                        {lead.status === 'processing' ? (
-                          <div className="loading loading-spinner loading-xs"></div>
-                        ) : (
-                          getDisplayName(lead).split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
-                        )}
-                      </div>
-                    )}
-
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1">
-                        <h4 className="font-semibold text-sm text-base-content truncate">
-                          {getDisplayName(lead)}
-                        </h4>
-                        <div className={`badge badge-sm ${getStatusColor(lead.status)}`}>
-                          {lead.status}
-                        </div>
-                      </div>
-
-                      {lead.title && (
-                        <div className="flex items-center gap-1 text-xs text-base-content/60 mb-1">
-                          <User className="h-3 w-3" />
-                          <span className="truncate">{lead.title}</span>
-                        </div>
-                      )}
-
-                      {lead.location && (
-                        <div className="flex items-center gap-1 text-xs text-base-content/60 mb-1">
-                          <MapPin className="h-3 w-3" />
-                          <span className="truncate">{lead.location}</span>
-                        </div>
-                      )}
-
-                      <p className="text-xs text-base-content/40 truncate mt-1">
-                        {lead.url}
-                      </p>
-
-                      {/* Progress Bar for Processing Leads */}
-                      {lead.status === "processing" && scrapingProgress[lead._id || lead.id] && (
-                        <div className="mt-2 space-y-1">
-                          <div className="flex justify-between text-xs text-base-content/60">
-                            <span>{scrapingProgress[lead._id || lead.id].message}</span>
-                            <span>{scrapingProgress[lead._id || lead.id].progress}%</span>
-                          </div>
-                          <progress
-                            className="progress progress-primary w-full h-1"
-                            value={scrapingProgress[lead._id || lead.id].progress}
-                            max="100"
-                          ></progress>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={handleDragEnd}
+          >
+            <SortableContext
+              items={filteredLeads.map(lead => lead._id || lead.id)}
+              strategy={verticalListSortingStrategy}
+            >
+              <div className="p-2 space-y-2">
+                {filteredLeads.map((lead) => (
+                  <SortableLeadItem
+                    key={lead._id || lead.id}
+                    lead={lead}
+                    isSelected={(selectedLead?._id || selectedLead?.id) === (lead._id || lead.id)}
+                    onSelect={onSelectLead}
+                    getDisplayName={getDisplayName}
+                    getStatusIcon={getStatusIcon}
+                    getStatusColor={getStatusColor}
+                    scrapingProgress={scrapingProgress}
+                  />
+                ))}
               </div>
-            ))}
-          </div>
+            </SortableContext>
+          </DndContext>
         )}
       </div>
     </div>

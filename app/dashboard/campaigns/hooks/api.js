@@ -36,6 +36,25 @@ export const campaignApi = {
     return result.campaign;
   },
 
+  // Update a campaign
+  updateCampaign: async ({ campaignId, updateData }) => {
+    const response = await fetch(`/api/campaigns/${campaignId}`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(updateData),
+    });
+
+    const result = await response.json();
+
+    if (!result.success) {
+      throw new Error(result.error || "Failed to update campaign");
+    }
+
+    return result.campaign;
+  },
+
   // Delete a campaign
   deleteCampaign: async (campaignId) => {
     const response = await fetch(`/api/campaigns/${campaignId}`, {
