@@ -47,6 +47,14 @@ export function useScraping() {
     },
   });
 
+  // Bulk update leads mutation (optimized)
+  const bulkUpdateLeadsMutation = useMutation({
+    mutationFn: ({ leadsData }) => leadApi.bulkUpdateLeads({ leadsData }),
+    onError: (error) => {
+      console.warn('Error bulk updating leads:', error);
+    },
+  });
+
   // Update lead mutation
   const updateLeadMutation = useMutation({
     mutationFn: ({ leadId, updateData }) => leadApi.updateLead({ leadId, updateData }),
@@ -80,13 +88,36 @@ export function useScraping() {
   // Process scraped data and update lead
   const processScrapedData = useCallback(async (leadId, items, leads, setLeads, leadUrl, campaignId = null) => {
     try {
+      // Update progress: Processing data
+      setScrapingProgress(prev => ({
+        ...prev,
+        [leadId]: {
+          status: 'processing',
+          progress: 60,
+          message: 'Processing scraped data...'
+        }
+      }));
+
+      // Small delay to make progress visible
+      await new Promise(resolve => setTimeout(resolve, 300));
+
       // Process scraped data exactly like Reachly
       const { extractLeadInfo, cleanScrapedPosts } = await import('@/libs/scraping-utils');
       const cleanedPosts = cleanScrapedPosts(items);
       const leadInfo = extractLeadInfo(cleanedPosts);
       
       console.log("Extracted lead info:", leadInfo);
-      console.log("Profile picture URL:", leadInfo.profilePicture);
+      console.log("Cleaned posts count:", cleanedPosts.length);
+
+      // Update progress: Saving posts
+      setScrapingProgress(prev => ({
+        ...prev,
+        [leadId]: {
+          status: 'processing',
+          progress: 75,
+          message: 'Saving posts to database...'
+        }
+      }));
 
       // Save posts to database using mutation
       try {
@@ -94,6 +125,16 @@ export function useScraping() {
       } catch (error) {
         console.warn('Failed to save posts, continuing...');
       }
+
+      // Update progress: Updating lead
+      setScrapingProgress(prev => ({
+        ...prev,
+        [leadId]: {
+          status: 'processing',
+          progress: 90,
+          message: 'Updating lead information...'
+        }
+      }));
 
       // Update lead in database using mutation
       const updateData = {
@@ -111,6 +152,7 @@ export function useScraping() {
         console.warn('Failed to update lead, continuing...');
       }
 
+      // Update progress: Completed
       setScrapingProgress(prev => ({
         ...prev,
         [leadId]: {
@@ -179,6 +221,16 @@ export function useScraping() {
     setLeads(updatedLeads);
 
     try {
+      // Update progress: Scraping started
+      setScrapingProgress(prev => ({
+        ...prev,
+        [leadId]: {
+          status: 'processing',
+          progress: 10,
+          message: 'Scraping LinkedIn profile...'
+        }
+      }));
+
       const result = await scrapingMutation.mutateAsync({
         urls: [lead.url],
         limitPerSource: scrapingSettings?.limitPerSource ?? 10,
@@ -186,6 +238,20 @@ export function useScraping() {
         rawData: scrapingSettings?.rawData ?? false,
         streamProgress: false
       });
+
+
+      // Update progress: Data received
+      setScrapingProgress(prev => ({
+        ...prev,
+        [leadId]: {
+          status: 'processing',
+          progress: 50,
+          message: `Received ${result.items?.length || 0} items, processing...`
+        }
+      }));
+
+      // Small delay to make progress visible
+      await new Promise(resolve => setTimeout(resolve, 500));
 
       if (result.items && result.items.length > 0) {
         const { leadInfo, cleanedPosts } = await processScrapedData(
@@ -213,6 +279,17 @@ export function useScraping() {
           message: error.message
         }
       }));
+
+      // Update lead status to error in database
+      try {
+        await updateLeadMutation.mutateAsync({ 
+          leadId, 
+          updateData: { status: "error" }, 
+          campaignId 
+        });
+      } catch (dbError) {
+        console.warn('Failed to update lead status in database:', dbError);
+      }
 
       const errorLeads = leads.map((l) =>
         (l._id || l.id) === leadId ? { ...l, status: "error" } : l
@@ -287,8 +364,9 @@ export function useScraping() {
 
         let successCount = 0;
         let errorCount = 0;
+        const bulkUpdateData = [];
 
-        // Process each lead
+        // Process each lead and prepare bulk update data
         const finalLeads = await Promise.all(leads.map(async (lead) => {
           const leadId = lead._id || lead.id;
           const isPendingLead = pendingLeads.some(pending => (pending._id || pending.id) === leadId);
@@ -312,6 +390,18 @@ export function useScraping() {
               
               successCount++;
               
+              // Prepare bulk update data
+              bulkUpdateData.push({
+                leadId,
+                posts: cleanedPosts,
+                status: "completed",
+                name: leadInfo.name,
+                title: leadInfo.title,
+                company: leadInfo.company,
+                location: leadInfo.location,
+                profilePicture: leadInfo.profilePicture
+              });
+              
               return {
                 ...lead,
                 status: "completed",
@@ -334,6 +424,12 @@ export function useScraping() {
                 }
               }));
               
+              // Prepare bulk update data for error
+              bulkUpdateData.push({
+                leadId,
+                status: "error"
+              });
+              
               errorCount++;
               return { ...lead, status: "error" };
             }
@@ -348,10 +444,51 @@ export function useScraping() {
               }
             }));
             
+            // Prepare bulk update data for error
+            bulkUpdateData.push({
+              leadId,
+              status: "error"
+            });
+            
             errorCount++;
             return { ...lead, status: "error" };
           }
         }));
+
+        // Bulk update all leads and posts in database (optimized)
+        if (bulkUpdateData.length > 0) {
+          try {
+            await bulkUpdateLeadsMutation.mutateAsync({ leadsData: bulkUpdateData });
+            console.log(`Bulk updated ${bulkUpdateData.length} leads successfully`);
+          } catch (bulkError) {
+            console.warn('Bulk update failed, falling back to individual updates:', bulkError);
+            // Fallback to individual updates if bulk fails
+            for (const updateData of bulkUpdateData) {
+              try {
+                if (updateData.posts) {
+                  await savePostsMutation.mutateAsync({ 
+                    leadId: updateData.leadId, 
+                    posts: updateData.posts 
+                  });
+                }
+                await updateLeadMutation.mutateAsync({ 
+                  leadId: updateData.leadId, 
+                  updateData: { 
+                    status: updateData.status,
+                    name: updateData.name,
+                    title: updateData.title,
+                    company: updateData.company,
+                    location: updateData.location,
+                    profilePicture: updateData.profilePicture
+                  }, 
+                  campaignId 
+                });
+              } catch (fallbackError) {
+                console.warn(`Failed to update lead ${updateData.leadId}:`, fallbackError);
+              }
+            }
+          }
+        }
 
         setLeads(finalLeads);
 
@@ -380,6 +517,32 @@ export function useScraping() {
         };
       });
       setScrapingProgress(prev => ({ ...prev, ...errorUpdates }));
+
+      // Update all pending leads to error status in database (bulk operation)
+      const errorBulkData = pendingLeads.map(lead => ({
+        leadId: lead._id || lead.id,
+        status: "error"
+      }));
+
+      try {
+        await bulkUpdateLeadsMutation.mutateAsync({ leadsData: errorBulkData });
+        console.log(`Bulk updated ${errorBulkData.length} leads to error status`);
+      } catch (bulkError) {
+        console.warn('Bulk error update failed, falling back to individual updates:', bulkError);
+        // Fallback to individual updates
+        for (const lead of pendingLeads) {
+          const leadId = lead._id || lead.id;
+          try {
+            await updateLeadMutation.mutateAsync({ 
+              leadId, 
+              updateData: { status: "error" }, 
+              campaignId 
+            });
+          } catch (dbError) {
+            console.warn(`Failed to update lead ${leadId} status in database:`, dbError);
+          }
+        }
+      }
 
       const errorLeads = leads.map((lead) => {
         const leadId = lead._id || lead.id;
@@ -412,5 +575,6 @@ export function useScraping() {
     isScraping: scrapingMutation.isPending,
     isSavingPosts: savePostsMutation.isPending,
     isUpdatingLead: updateLeadMutation.isPending,
+    isBulkUpdating: bulkUpdateLeadsMutation.isPending,
   };
 }
