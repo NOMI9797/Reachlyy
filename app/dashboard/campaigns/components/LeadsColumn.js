@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, memo } from "react";
+import toast from "react-hot-toast";
 import {
   Plus,
   Upload,
@@ -16,6 +17,7 @@ import {
   Link,
   User,
   MapPin,
+  Trash2,
 } from "lucide-react";
 import {
   DndContext,
@@ -183,6 +185,8 @@ const LeadsColumn = memo(function LeadsColumn({
   const [showAddForm, setShowAddForm] = useState(false);
   const [newUrls, setNewUrls] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
+  const [showClearErrorDialog, setShowClearErrorDialog] = useState(false);
+  const [isClearingErrors, setIsClearingErrors] = useState(false);
 
   // Drag and drop sensors
   const sensors = useSensors(
@@ -240,7 +244,7 @@ const LeadsColumn = memo(function LeadsColumn({
             const lines = csv.split("\n").filter((line) => line.trim());
 
             if (lines.length === 0) {
-              alert("CSV file is empty");
+              toast.error("CSV file is empty");
               return;
             }
 
@@ -281,7 +285,7 @@ const LeadsColumn = memo(function LeadsColumn({
     const urlsToAdd = urls || newUrls.split("\n").filter((url) => url.trim() && url.includes("linkedin.com"));
 
     if (urlsToAdd.length === 0) {
-      alert("Please enter valid LinkedIn profile URLs");
+      toast.error("Please enter valid LinkedIn profile URLs");
       return;
     }
 
@@ -304,6 +308,40 @@ const LeadsColumn = memo(function LeadsColumn({
   const handleRunAll = async () => {
     const pendingLeads = leads.filter(lead => lead.status === "pending" || lead.status === "error");
     await scrapeMultipleLeads(pendingLeads, scrapingSettings, leads, setLeads, campaignId);
+  };
+
+  const handleClearErrorLeads = async () => {
+    setIsClearingErrors(true);
+    try {
+      const response = await fetch(`/api/leads/clear-failed?campaignId=${campaignId}`, {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to clear error leads');
+      }
+
+      const result = await response.json();
+      
+      // Update the leads list by removing error leads
+      const updatedLeads = leads.filter(lead => lead.status !== 'error');
+      setLeads(updatedLeads);
+      
+      // Clear selection if selected lead was an error lead
+      if (selectedLead && selectedLead.status === 'error') {
+        onSelectLead(null);
+      }
+
+      // Show success toast
+      toast.success(`Successfully removed ${result.data.deletedLeads} error lead${result.data.deletedLeads > 1 ? 's' : ''}`);
+      
+      setShowClearErrorDialog(false);
+    } catch (error) {
+      console.error('Error clearing failed leads:', error);
+      toast.error('Failed to clear error leads. Please try again.');
+    } finally {
+      setIsClearingErrors(false);
+    }
   };
 
   const getStatusIcon = (status) => {
@@ -339,6 +377,8 @@ const LeadsColumn = memo(function LeadsColumn({
       lead.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       lead.company?.toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  const errorLeadsCount = leads.filter(lead => lead.status === 'error').length;
 
   if (collapsed) {
     return (
@@ -418,6 +458,20 @@ const LeadsColumn = memo(function LeadsColumn({
             Import CSV
           </button>
         </div>
+
+        {/* Clear Error Leads Button */}
+        {errorLeadsCount > 0 && (
+          <div className="mb-3">
+            <button
+              onClick={() => setShowClearErrorDialog(true)}
+              disabled={isClearingErrors}
+              className="btn btn-error btn-sm w-full gap-1"
+            >
+              <Trash2 className="h-3 w-3" />
+              {isClearingErrors ? "Removing..." : `Remove ${errorLeadsCount} Error Lead${errorLeadsCount > 1 ? 's' : ''}`}
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Add URLs Form */}
@@ -484,6 +538,45 @@ const LeadsColumn = memo(function LeadsColumn({
           </DndContext>
         )}
       </div>
+
+      {/* Clear Error Leads Confirmation Dialog */}
+      {showClearErrorDialog && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-base-100 rounded-lg p-6 max-w-md mx-4">
+            <h3 className="font-bold text-lg mb-4">Remove Error Leads</h3>
+            <p className="text-base-content/80 mb-6">
+              Are you sure you want to remove {errorLeadsCount} error lead{errorLeadsCount > 1 ? 's' : ''}? 
+              This action cannot be undone and will also remove any associated posts and messages.
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setShowClearErrorDialog(false)}
+                disabled={isClearingErrors}
+                className="btn btn-ghost btn-sm"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleClearErrorLeads}
+                disabled={isClearingErrors}
+                className="btn btn-error btn-sm gap-1"
+              >
+                {isClearingErrors ? (
+                  <>
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    Removing...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="h-3 w-3" />
+                    Remove
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 });
