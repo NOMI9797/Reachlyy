@@ -12,6 +12,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Plus,
+  UserCheck,
 } from "lucide-react";
 
 const menuItems = [
@@ -38,6 +39,12 @@ const menuItems = [
     label: "Analytics", 
     href: "/dashboard/analytics",
     key: "analytics" 
+  },
+  { 
+    icon: UserCheck, 
+    label: "Accounts", 
+    href: "/dashboard/accounts",
+    key: "accounts" 
   },
   { 
     icon: Settings, 

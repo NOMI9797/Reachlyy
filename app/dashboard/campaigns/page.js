@@ -48,7 +48,7 @@ export default function CampaignsPage() {
         sidebarCollapsed ? "ml-16" : "ml-64"
       } flex flex-col`}>
         {/* Top Bar */}
-        <TopBar />
+        <TopBar title="Campaigns" />
 
         {/* Content Area */}
         <div className="flex-1 overflow-hidden">
