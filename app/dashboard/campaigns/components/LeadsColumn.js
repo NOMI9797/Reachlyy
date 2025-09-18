@@ -18,6 +18,7 @@ import {
   User,
   MapPin,
   Trash2,
+  MessageSquare,
 } from "lucide-react";
 import {
   DndContext,
@@ -344,6 +345,7 @@ const LeadsColumn = memo(function LeadsColumn({
     }
   };
 
+
   const getStatusIcon = (status) => {
     switch (status) {
       case "pending":
@@ -472,6 +474,8 @@ const LeadsColumn = memo(function LeadsColumn({
             </button>
           </div>
         )}
+
+
       </div>
 
       {/* Add URLs Form */}
@@ -577,6 +581,7 @@ const LeadsColumn = memo(function LeadsColumn({
           </div>
         </div>
       )}
+
     </div>
   );
 });

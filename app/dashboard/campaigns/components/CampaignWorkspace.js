@@ -1,11 +1,12 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { ArrowLeft, Settings, Maximize2, Minimize2, Zap, Target, MessageSquare, BarChart3 } from "lucide-react";
+import { ArrowLeft, Settings, Maximize2, Minimize2, Zap, Target, MessageSquare, BarChart3, Loader2 } from "lucide-react";
 import LeadsColumn from "./LeadsColumn";
 import PostsColumn from "./PostsColumn";
 import AIResponseColumn from "./AIResponseColumn";
 import { useLeads } from "../hooks/useLeads";
+import { useBulkMessageGeneration } from "../hooks/useBulkMessageGeneration";
 
 export default function CampaignWorkspace({ campaign, onBack }) {
   const [selectedLead, setSelectedLead] = useState(null);
@@ -33,6 +34,20 @@ export default function CampaignWorkspace({ campaign, onBack }) {
     customPrompt: "",
   });
 
+  // Bulk message generation
+  const {
+    isGenerating,
+    generateAllMessages,
+    useBulkStats
+  } = useBulkMessageGeneration();
+  
+  const [showBulkMessageDialog, setShowBulkMessageDialog] = useState(false);
+
+  // Get bulk message generation stats
+  const { data: bulkStats, isLoading: loadingBulkStats } = useBulkStats(campaign?.id);
+  const leadsNeedingMessages = bulkStats?.data?.leadsNeedingMessages || 0;
+  const completedLeadsCount = leads.filter(lead => lead.status === 'completed').length;
+
   const containerRef = useRef(null);
   const isDragging = useRef(false);
   const dragColumn = useRef(-1);
@@ -43,6 +58,19 @@ export default function CampaignWorkspace({ campaign, onBack }) {
       fetchLeads(campaign.id);
     }
   }, [campaign?.id, fetchLeads]);
+
+  // Handle bulk message generation
+  const handleBulkGenerateMessages = async () => {
+    try {
+      await generateAllMessages(campaign.id, {
+        model: aiSettings.model,
+        customPrompt: aiSettings.customPrompt
+      });
+      setShowBulkMessageDialog(false);
+    } catch (error) {
+      console.error('Error in bulk message generation:', error);
+    }
+  };
 
   // Column resizing logic
   const handleMouseDown = (columnIndex) => (e) => {
@@ -358,6 +386,30 @@ export default function CampaignWorkspace({ campaign, onBack }) {
                       />
                     </label>
                   </div>
+
+                  {/* Generate All Messages Button */}
+                  {completedLeadsCount > 0 && (
+                    <div className="divider"></div>
+                  )}
+                  
+                  {completedLeadsCount > 0 && (
+                    <div className="space-y-3">
+                      <h4 className="font-semibold">Message Generation</h4>
+                      <button
+                        onClick={() => setShowBulkMessageDialog(true)}
+                        disabled={isGenerating || loadingBulkStats}
+                        className="btn btn-primary w-full gap-2"
+                      >
+                        <MessageSquare className="h-4 w-4" />
+                        {isGenerating ? "Generating..." : 
+                         loadingBulkStats ? "Loading..." :
+                         `Generate Messages (${leadsNeedingMessages || completedLeadsCount})`}
+                      </button>
+                      <div className="text-xs text-base-content/60">
+                        Generate personalized messages for all completed leads that don't have messages yet.
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
               {activeColumn === 'posts' && (
@@ -430,6 +482,47 @@ export default function CampaignWorkspace({ campaign, onBack }) {
                   </div>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Message Generation Confirmation Dialog */}
+      {showBulkMessageDialog && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-base-100 rounded-lg p-6 max-w-md mx-4">
+            <h3 className="font-bold text-lg mb-4">Generate Messages for All Completed Leads</h3>
+            <p className="text-base-content/80 mb-4">
+              This will generate personalized messages for {leadsNeedingMessages || completedLeadsCount} completed lead{(leadsNeedingMessages || completedLeadsCount) > 1 ? 's' : ''} that don't have messages yet.
+            </p>
+            <p className="text-sm text-base-content/60 mb-6">
+              Each message will be generated based on the lead's scraped posts and engagement data using the {aiSettings.model} model. This process may take a few minutes.
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setShowBulkMessageDialog(false)}
+                disabled={isGenerating}
+                className="btn btn-ghost btn-sm"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleBulkGenerateMessages}
+                disabled={isGenerating}
+                className="btn btn-primary btn-sm gap-1"
+              >
+                {isGenerating ? (
+                  <>
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    Generating...
+                  </>
+                ) : (
+                  <>
+                    <MessageSquare className="h-3 w-3" />
+                    Generate Messages
+                  </>
+                )}
+              </button>
             </div>
           </div>
         </div>
