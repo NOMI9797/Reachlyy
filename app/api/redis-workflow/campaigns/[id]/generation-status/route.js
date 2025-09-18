@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/libs/db";
 import { leads, messages } from "@/libs/schema";
 import { eq, and, count } from "drizzle-orm";
-import { getRedisClient } from "@/libs/redis";
+import getRedisClient from "@/libs/redis";
 
 /**
  * GET /api/redis-workflow/campaigns/[id]/generation-status

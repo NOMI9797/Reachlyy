@@ -7,6 +7,7 @@ import PostsColumn from "./PostsColumn";
 import AIResponseColumn from "./AIResponseColumn";
 import { useLeads } from "../hooks/useLeads";
 import { useBulkMessageGeneration } from "../hooks/useBulkMessageGeneration";
+import { useRedisWorkflow } from "../hooks/useRedisWorkflow";
 
 export default function CampaignWorkspace({ campaign, onBack }) {
   const [selectedLead, setSelectedLead] = useState(null);
@@ -34,18 +35,24 @@ export default function CampaignWorkspace({ campaign, onBack }) {
     customPrompt: "",
   });
 
-  // Bulk message generation
+  // Redis Workflow (New System)
   const {
-    isGenerating,
-    generateAllMessages,
-    useBulkStats
-  } = useBulkMessageGeneration();
+    isProcessing,
+    queueAllPendingLeads,
+    useLeadsReadyForMessages,
+    useGenerationStatus,
+    isQueueing,
+    isProcessingMessages
+  } = useRedisWorkflow();
   
   const [showBulkMessageDialog, setShowBulkMessageDialog] = useState(false);
 
-  // Get bulk message generation stats
-  const { data: bulkStats, isLoading: loadingBulkStats } = useBulkStats(campaign?.id);
-  const leadsNeedingMessages = bulkStats?.data?.leadsNeedingMessages || 0;
+  // Get Redis workflow data
+  const { data: leadsReadyData, isLoading: loadingLeadsReady } = useLeadsReadyForMessages(campaign?.id);
+  const { data: statusData, isLoading: loadingStatus } = useGenerationStatus(campaign?.id);
+  
+  const leadsReadyCount = leadsReadyData?.data?.count || 0;
+  const redisStatus = statusData?.data || {};
   const completedLeadsCount = leads.filter(lead => lead.status === 'completed').length;
 
   const containerRef = useRef(null);
@@ -59,16 +66,16 @@ export default function CampaignWorkspace({ campaign, onBack }) {
     }
   }, [campaign?.id, fetchLeads]);
 
-  // Handle bulk message generation
+  // Handle Redis workflow message generation
   const handleBulkGenerateMessages = async () => {
     try {
-      await generateAllMessages(campaign.id, {
+      await queueAllPendingLeads(campaign.id, {
         model: aiSettings.model,
         customPrompt: aiSettings.customPrompt
       });
       setShowBulkMessageDialog(false);
     } catch (error) {
-      console.error('Error in bulk message generation:', error);
+      console.error('Error in Redis workflow message generation:', error);
     }
   };
 
@@ -397,17 +404,60 @@ export default function CampaignWorkspace({ campaign, onBack }) {
                       <h4 className="font-semibold">Message Generation</h4>
                       <button
                         onClick={() => setShowBulkMessageDialog(true)}
-                        disabled={isGenerating || loadingBulkStats}
+                        disabled={isProcessing || loadingLeadsReady}
                         className="btn btn-primary w-full gap-2"
                       >
                         <MessageSquare className="h-4 w-4" />
-                        {isGenerating ? "Generating..." : 
-                         loadingBulkStats ? "Loading..." :
-                         `Generate Messages (${leadsNeedingMessages || completedLeadsCount})`}
+                        {isProcessing ? "Processing..." : 
+                         loadingLeadsReady ? "Loading..." :
+                         `Generate Messages (${leadsReadyCount || completedLeadsCount})`}
                       </button>
                       <div className="text-xs text-base-content/60">
                         Generate personalized messages for all completed leads that don't have messages yet.
                       </div>
+                      
+                      {/* Redis Workflow Status */}
+                      {redisStatus.redis && (
+                        <div className="mt-3 p-3 bg-base-200 rounded-lg">
+                          <div className="text-xs font-semibold mb-2">Redis Workflow Status</div>
+                          <div className="grid grid-cols-2 gap-2 text-xs">
+                            <div>
+                              <span className="text-base-content/60">Pending:</span>
+                              <span className="ml-1 font-medium">{redisStatus.leads?.pending || 0}</span>
+                            </div>
+                            <div>
+                              <span className="text-base-content/60">Completed:</span>
+                              <span className="ml-1 font-medium">{redisStatus.leads?.completed || 0}</span>
+                            </div>
+                            <div>
+                              <span className="text-base-content/60">Messages:</span>
+                              <span className="ml-1 font-medium">{redisStatus.messages?.total || 0}</span>
+                            </div>
+                            <div>
+                              <span className="text-base-content/60">Queue:</span>
+                              <span className="ml-1 font-medium">{redisStatus.redis?.queueLength || 0}</span>
+                            </div>
+                          </div>
+                          {isProcessingMessages && (
+                            <div className="mt-2 text-xs text-primary">
+                              <Loader2 className="h-3 w-3 inline animate-spin mr-1" />
+                              Processing messages...
+                            </div>
+                          )}
+                          {redisStatus.redis?.queueLength > 0 && !isProcessingMessages && (
+                            <div className="mt-2">
+                              <button
+                                onClick={() => processMessages()}
+                                className="btn btn-xs btn-primary gap-1"
+                                disabled={isProcessingMessages}
+                              >
+                                <Zap className="h-3 w-3" />
+                                Process Queue ({redisStatus.redis.queueLength})
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -493,7 +543,7 @@ export default function CampaignWorkspace({ campaign, onBack }) {
           <div className="bg-base-100 rounded-lg p-6 max-w-md mx-4">
             <h3 className="font-bold text-lg mb-4">Generate Messages for All Completed Leads</h3>
             <p className="text-base-content/80 mb-4">
-              This will generate personalized messages for {leadsNeedingMessages || completedLeadsCount} completed lead{(leadsNeedingMessages || completedLeadsCount) > 1 ? 's' : ''} that don't have messages yet.
+              This will generate personalized messages for {leadsReadyCount || completedLeadsCount} completed lead{(leadsReadyCount || completedLeadsCount) > 1 ? 's' : ''} that don't have messages yet.
             </p>
             <p className="text-sm text-base-content/60 mb-6">
               Each message will be generated based on the lead's scraped posts and engagement data using the {aiSettings.model} model. This process may take a few minutes.
@@ -501,17 +551,17 @@ export default function CampaignWorkspace({ campaign, onBack }) {
             <div className="flex gap-3 justify-end">
               <button
                 onClick={() => setShowBulkMessageDialog(false)}
-                disabled={isGenerating}
+                disabled={isProcessing}
                 className="btn btn-ghost btn-sm"
               >
                 Cancel
               </button>
               <button
                 onClick={handleBulkGenerateMessages}
-                disabled={isGenerating}
+                disabled={isProcessing}
                 className="btn btn-primary btn-sm gap-1"
               >
-                {isGenerating ? (
+                {isProcessing ? (
                   <>
                     <Loader2 className="h-3 w-3 animate-spin" />
                     Generating...

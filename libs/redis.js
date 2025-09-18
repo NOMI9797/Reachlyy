@@ -167,6 +167,17 @@ export class RedisStreamManager {
       throw error;
     }
   }
+
+  // Get pending count (unacknowledged messages)
+  async getPendingCount(streamName, groupName) {
+    try {
+      const pendingInfo = await this.redis.xpending(streamName, groupName);
+      return pendingInfo ? pendingInfo[0] : 0; // First element is pending count
+    } catch (error) {
+      console.error('❌ Error getting pending count:', error);
+      return 0; // Return 0 if error (stream might not exist)
+    }
+  }
 }
 
 export default getRedisClient;

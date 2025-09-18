@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/libs/db";
-import { leads } from "@/libs/schema";
-import { eq, and } from "drizzle-orm";
+import { leads, messages } from "@/libs/schema";
+import { eq, and, notExists } from "drizzle-orm";
 import { RedisStreamManager } from "@/libs/redis";
 
 /**
@@ -30,23 +30,26 @@ export async function POST(request, { params }) {
       );
     }
 
-    console.log(`🔄 Redis Workflow: Queueing leads for campaign ${campaignId}`);
+    console.log(`🔄 Redis Workflow: Queueing completed leads for message generation for campaign ${campaignId}`);
 
-    // Fetch pending leads for the campaign
-    const pendingLeads = await db
+    // Fetch completed leads that don't have messages yet
+    const leadsReadyForMessages = await db
       .select()
       .from(leads)
       .where(
         and(
           eq(leads.campaignId, campaignId),
-          eq(leads.status, 'pending')
+          eq(leads.status, 'completed'),
+          notExists(
+            db.select().from(messages).where(eq(messages.leadId, leads.id))
+          )
         )
       );
 
-    if (pendingLeads.length === 0) {
+    if (leadsReadyForMessages.length === 0) {
       return NextResponse.json({
         success: true,
-        message: "No pending leads found for this campaign",
+        message: "No completed leads found that need message generation for this campaign",
         data: {
           campaignId,
           leadsQueued: 0
@@ -64,7 +67,7 @@ export async function POST(request, { params }) {
 
     // Push leads to Redis stream
     const messageIds = [];
-    for (const lead of pendingLeads) {
+    for (const lead of leadsReadyForMessages) {
       const leadData = {
         campaign_id: campaignId,
         lead_id: lead.id,
@@ -81,14 +84,14 @@ export async function POST(request, { params }) {
       console.log(`✅ Queued lead ${lead.id} to Redis stream: ${messageId}`);
     }
 
-    console.log(`🎉 Redis Workflow: Successfully queued ${pendingLeads.length} leads`);
+    console.log(`🎉 Redis Workflow: Successfully queued ${leadsReadyForMessages.length} completed leads for message generation`);
 
     return NextResponse.json({
       success: true,
-      message: `Successfully queued ${pendingLeads.length} leads for AI message generation`,
+      message: `Successfully queued ${leadsReadyForMessages.length} completed leads for AI message generation`,
       data: {
         campaignId,
-        leadsQueued: pendingLeads.length,
+        leadsQueued: leadsReadyForMessages.length,
         messageIds: messageIds,
         streamName: streamName,
         groupName: groupName,
