@@ -68,9 +68,30 @@ export async function GET(request, { params }) {
       .from(messages)
       .where(eq(messages.campaignId, campaignId));
 
-    // Get Redis stream length
+    // Get Redis stream queue length (unprocessed messages)
     const redis = getRedisClient();
-    const streamLength = await redis.xlen("leads-stream");
+    const streamName = "leads-stream";
+    const groupName = "message-generators";
+    
+    let streamLength = 0;
+    try {
+      // Get consumer group info to find lag (unprocessed messages)
+      const groupInfo = await redis.xinfo('GROUPS', streamName);
+      if (groupInfo && groupInfo.length > 0) {
+        // Find our consumer group
+        for (let i = 0; i < groupInfo.length; i++) {
+          const group = groupInfo[i];
+          if (group[1] === groupName) { // group[1] is the group name
+            // group[9] is the lag (unprocessed messages) - it's the 10th element (index 9)
+            streamLength = parseInt(group[9]) || 0;
+            break;
+          }
+        }
+      }
+    } catch (error) {
+      // If consumer group doesn't exist, return 0
+      streamLength = 0;
+    }
 
     const statusData = {
       campaignId,
