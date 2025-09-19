@@ -134,17 +134,15 @@ export async function POST(request) {
       const campaigns = [...new Set(results.map(r => r.campaignId))];
       for (const campaignId of campaigns) {
         try {
-          // Remove processed leads from Redis cache
-          if (leadIdsToUpdate.length > 0) {
-            await redis.hdel(`campaign:${campaignId}:leads`, ...leadIdsToUpdate);
-          }
+          // Keep all leads in Redis cache (don't remove processed leads)
+          // This ensures consistency with existing campaigns
+          console.log(`✅ WORKER: Keeping ${leadIdsToUpdate.length} processed leads in Redis cache for campaign ${campaignId}`);
           
-          // Update campaign data
+          // Update campaign data timestamp only
           const currentData = await redis.hgetall(`campaign:${campaignId}:data`);
           if (currentData && currentData.leadsCount) {
-            const newCount = Math.max(0, parseInt(currentData.leadsCount) - processedCount);
-            await redis.hset(`campaign:${campaignId}:data`, 'leadsCount', newCount);
             await redis.hset(`campaign:${campaignId}:data`, 'lastUpdated', Date.now());
+            console.log(`✅ WORKER: Updated lastUpdated timestamp for campaign ${campaignId}`);
           }
           
         } catch (error) {

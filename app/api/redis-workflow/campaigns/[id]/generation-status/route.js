@@ -57,28 +57,7 @@ export async function GET(request, { params }) {
 
     console.log(`📋 Found ${leadsNeedingMessages.length} leads ready for messages`);
 
-    // Auto-queue leads that need messages (background process)
-    if (leadsNeedingMessages.length > 0) {
-      try {
-        // Trigger auto-queue in background (don't wait for response)
-        fetch(`${process.env.NEXTAUTH_URL || 'http://localhost:8085'}/api/redis-workflow/campaigns/${campaignId}/auto-queue`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
-            model: "llama-3.1-8b-instant",
-            customPrompt: ""
-          })
-        }).catch(error => {
-          console.log(`⚠️ Auto-queue background call failed: ${error.message}`);
-        });
-        
-        console.log(`🚀 AUTO-QUEUE: Triggered background auto-queue for ${leadsNeedingMessages.length} leads`);
-      } catch (error) {
-        console.log(`⚠️ Auto-queue trigger failed: ${error.message}`);
-      }
-    }
-    
-    // Get Redis stream queue length
+    // Get Redis stream queue length first
     const streamName = "leads:message-generation";
     const groupName = "message-generators";
     
@@ -100,6 +79,48 @@ export async function GET(request, { params }) {
       }
     } catch (error) {
       streamLength = 0;
+    }
+
+    // Auto-queue leads that need messages (background process) - with smart conditions and circuit breaker
+    if (leadsNeedingMessages.length > 0) {
+      // Check if there's already a queue to prevent spam
+      if (streamLength === 0) {
+        // Circuit breaker: Check if auto-queue was recently attempted
+        const autoQueueKey = `auto-queue:${campaignId}:attempt`;
+        const lastAttempt = await redis.get(autoQueueKey);
+        const now = Date.now();
+        const cooldownPeriod = 30000; // 30 seconds cooldown
+        
+        if (!lastAttempt || (now - parseInt(lastAttempt)) > cooldownPeriod) {
+          try {
+            // Set attempt timestamp
+            await redis.setex(autoQueueKey, 60, now.toString());
+            
+            // Trigger auto-queue in background (don't wait for response)
+            fetch(`${process.env.NEXTAUTH_URL || 'http://localhost:8085'}/api/redis-workflow/campaigns/${campaignId}/auto-queue`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ 
+                model: "llama-3.1-8b-instant",
+                customPrompt: ""
+              })
+            }).catch(error => {
+              console.log(`⚠️ Auto-queue background call failed: ${error.message}`);
+            });
+            
+            console.log(`🚀 AUTO-QUEUE: Triggered background auto-queue for ${leadsNeedingMessages.length} leads (queue was empty)`);
+          } catch (error) {
+            console.log(`⚠️ Auto-queue trigger failed: ${error.message}`);
+          }
+        } else {
+          const timeLeft = Math.ceil((cooldownPeriod - (now - parseInt(lastAttempt))) / 1000);
+          console.log(`⏭️ AUTO-QUEUE: Skipped auto-queue - cooldown active (${timeLeft}s remaining)`);
+        }
+      } else {
+        console.log(`⏭️ AUTO-QUEUE: Skipped auto-queue - queue already has ${streamLength} items`);
+      }
+    } else {
+      console.log(`⏭️ AUTO-QUEUE: Skipped auto-queue - no leads need messages`);
     }
 
     const leadsCount = Object.keys(leadsData).length;

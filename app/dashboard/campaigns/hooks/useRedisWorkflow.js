@@ -143,7 +143,32 @@ export function useRedisWorkflow() {
       queryKey: ['redis-workflow-status', campaignId],
       queryFn: () => getGenerationStatus(campaignId),
       enabled: !!campaignId,
-      refetchInterval: 2000, // Refetch every 2 seconds for real-time updates
+      refetchInterval: (data) => {
+        // Smart polling based on campaign state
+        if (!data?.data) return 10000; // 10s if no data
+        
+        const { redis, leads } = data.data;
+        const queueLength = redis?.queueLength || 0;
+        const hasPendingLeads = leads?.pending > 0;
+        const hasCompletedLeads = leads?.completed > 0;
+        const isProcessing = isProcessingMessages || isQueueing;
+        
+        // Active state: Poll every 2s when there's work
+        if (queueLength > 0 || isProcessing || hasPendingLeads) {
+          console.log(`🔄 SMART POLLING: Active state - polling every 2s (queue: ${queueLength}, processing: ${isProcessing})`);
+          return 2000;
+        }
+        
+        // Idle state: Poll every 10s when no active work
+        if (hasCompletedLeads) {
+          console.log(`⏸️ SMART POLLING: Idle state - polling every 10s (completed: ${leads.completed})`);
+          return 10000;
+        }
+        
+        // Stable state: Poll every 30s when all done
+        console.log(`✅ SMART POLLING: Stable state - polling every 30s`);
+        return 30000;
+      },
     });
   };
 

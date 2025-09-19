@@ -108,6 +108,30 @@ export async function POST(request) {
       };
     });
 
+    console.log(`✅ BULK UPDATE: Successfully updated ${result.leadsUpdated} leads and inserted ${result.postsInserted} posts`);
+
+    // Refresh Redis cache for affected campaigns after bulk update
+    const campaignIds = [...new Set(result.updatedLeads.map(lead => lead.campaignId))];
+    console.log(`🔄 CACHE REFRESH: Triggering cache refresh for ${campaignIds.length} campaigns after bulk update`);
+    
+    for (const campaignId of campaignIds) {
+      try {
+        const refreshResponse = await fetch(`${process.env.NEXTAUTH_URL || 'http://localhost:8085'}/api/redis-workflow/campaigns/${campaignId}/refresh-cache`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' }
+        });
+        
+        if (refreshResponse.ok) {
+          const refreshData = await refreshResponse.json();
+          console.log(`✅ CACHE REFRESH: Successfully refreshed cache for campaign ${campaignId}: ${refreshData.data.leadsCount} leads cached`);
+        } else {
+          console.log(`⚠️ CACHE REFRESH: Failed to refresh cache for campaign ${campaignId}: ${refreshResponse.status}`);
+        }
+      } catch (error) {
+        console.log(`⚠️ CACHE REFRESH: Error refreshing cache for campaign ${campaignId}: ${error.message}`);
+      }
+    }
+
     return NextResponse.json({
       success: true,
       message: `Successfully updated ${result.leadsUpdated} leads and inserted ${result.postsInserted} posts`,

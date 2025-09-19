@@ -70,9 +70,10 @@ export default function CampaignWorkspace({ campaign, onBack }) {
   // Handle Redis workflow message generation
   const handleBulkGenerateMessages = async () => {
     try {
-      await queueAllPendingLeads(campaign.id, {
-        model: aiSettings.model,
-        customPrompt: aiSettings.customPrompt
+      // Just process the existing queue instead of re-queuing
+      await processMessages({
+        batchSize: 5,
+        consumerName: 'manual-generate'
       });
       setShowBulkMessageDialog(false);
     } catch (error) {
