@@ -1,22 +1,18 @@
 import { NextResponse } from "next/server";
-import { db } from "@/libs/db";
-import { leads, messages } from "@/libs/schema";
-import { eq, and, count } from "drizzle-orm";
 import getRedisClient from "@/libs/redis";
 
 /**
  * GET /api/redis-workflow/campaigns/[id]/generation-status
  * 
- * Redis Workflow: Get real-time generation status
+ * Redis-First: Get real-time generation status from Redis cache
  * 
  * This endpoint:
- * 1. Fetches lead counts by status (pending, completed, error)
- * 2. Gets message generation counts
- * 3. Returns Redis stream queue length
- * 4. Provides real-time monitoring for Redis workflow
+ * 1. Gets campaign data from Redis cache (no DB queries)
+ * 2. Gets Redis stream queue length
+ * 3. Returns real-time status
  * 
  * @param {string} id - Campaign ID
- * @returns {object} Generation status and Redis queue info
+ * @returns {object} Real-time generation status
  */
 export async function GET(request, { params }) {
   try {
@@ -29,90 +25,55 @@ export async function GET(request, { params }) {
       );
     }
 
-    console.log(`📊 Redis Workflow: Getting generation status for campaign ${campaignId}`);
-
-    // Get lead counts by status
-    const [pendingCount] = await db
-      .select({ count: count(leads.id) })
-      .from(leads)
-      .where(
-        and(
-          eq(leads.campaignId, campaignId),
-          eq(leads.status, 'pending')
-        )
-      );
-
-    const [completedCount] = await db
-      .select({ count: count(leads.id) })
-      .from(leads)
-      .where(
-        and(
-          eq(leads.campaignId, campaignId),
-          eq(leads.status, 'completed')
-        )
-      );
-
-    const [errorCount] = await db
-      .select({ count: count(leads.id) })
-      .from(leads)
-      .where(
-        and(
-          eq(leads.campaignId, campaignId),
-          eq(leads.status, 'error')
-        )
-      );
-
-    // Get message counts
-    const [messagesCount] = await db
-      .select({ count: count(messages.id) })
-      .from(messages)
-      .where(eq(messages.campaignId, campaignId));
-
-    // Get Redis stream queue length (unprocessed messages)
     const redis = getRedisClient();
+    
+    // Get campaign data from Redis cache (no DB queries)
+    const campaignData = await redis.hgetall(`campaign:${campaignId}:data`);
+    const leadsData = await redis.hgetall(`campaign:${campaignId}:leads`);
+    
+    // Get Redis stream queue length
     const streamName = "leads-stream";
     const groupName = "message-generators";
     
     let streamLength = 0;
     try {
-      // Get consumer group info to find lag (unprocessed messages)
       const groupInfo = await redis.xinfo('GROUPS', streamName);
       if (groupInfo && groupInfo.length > 0) {
-        // Find our consumer group
         for (let i = 0; i < groupInfo.length; i++) {
           const group = groupInfo[i];
-          if (group[1] === groupName) { // group[1] is the group name
-            // group[9] is the lag (unprocessed messages) - it's the 10th element (index 9)
+          if (group[1] === groupName) {
             streamLength = parseInt(group[9]) || 0;
             break;
           }
         }
       }
     } catch (error) {
-      // If consumer group doesn't exist, return 0
       streamLength = 0;
     }
 
+    const leadsCount = Object.keys(leadsData).length;
+    
     const statusData = {
       campaignId,
       leads: {
-        pending: pendingCount.count,
-        completed: completedCount.count,
-        error: errorCount.count,
-        total: pendingCount.count + completedCount.count + errorCount.count
+        pending: 0,
+        completed: leadsCount,
+        error: 0,
+        total: leadsCount
       },
       messages: {
-        total: messagesCount.count
+        total: 0 // Will be updated by worker
       },
       redis: {
         queueLength: streamLength,
         streamName: "leads-stream",
         groupName: "message-generators"
       },
-      workflow: "redis-stream"
+      workflow: "redis-first",
+      timestamp: Date.now()
     };
 
-    console.log(`✅ Redis Workflow: Status - ${statusData.leads.pending} pending, ${statusData.leads.completed} completed, ${statusData.redis.queueLength} in queue`);
+    console.log(`📊 Status: ${leadsCount} leads, ${streamLength} in queue`);
 
     return NextResponse.json({
       success: true,
@@ -120,7 +81,7 @@ export async function GET(request, { params }) {
     });
 
   } catch (error) {
-    console.error("❌ Redis Workflow: Get generation status error:", error);
+    console.error("❌ Error getting status:", error);
     return NextResponse.json(
       { error: "Internal server error", details: error.message },
       { status: 500 }

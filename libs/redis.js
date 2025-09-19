@@ -32,11 +32,7 @@ let redis = null;
 
 export function getRedisClient() {
   if (!redis) {
-    console.log('🔧 Redis config:', {
-      hasUrl: !!process.env.REDIS_URL,
-      url: process.env.REDIS_URL ? process.env.REDIS_URL.substring(0, 20) + '...' : 'none',
-      config: redisConfig
-    });
+    // Redis config loaded
     
     // For Upstash, use the URL directly
     if (process.env.REDIS_URL) {
@@ -53,19 +49,11 @@ export function getRedisClient() {
     
     // Connection event handlers
     redis.on('connect', () => {
-      console.log('✅ Redis connected successfully');
+      console.log('✅ Redis connected');
     });
     
     redis.on('error', (error) => {
-      console.error('❌ Redis connection error:', error);
-    });
-    
-    redis.on('close', () => {
-      console.log('🔌 Redis connection closed');
-    });
-    
-    redis.on('reconnecting', () => {
-      console.log('🔄 Redis reconnecting...');
+      console.error('❌ Redis error:', error);
     });
   }
   
@@ -108,7 +96,7 @@ export class RedisStreamManager {
         '*', // Auto-generate message ID
         ...Object.entries(leadData).flat()
       );
-      console.log(`✅ Added lead to stream: ${messageId}`);
+      // Lead added to stream
       return messageId;
     } catch (error) {
       console.error('❌ Error adding lead to stream:', error);
@@ -120,10 +108,9 @@ export class RedisStreamManager {
   async createConsumerGroup(streamName, groupName) {
     try {
       await this.redis.xgroup('CREATE', streamName, groupName, '0', 'MKSTREAM');
-      console.log(`✅ Created consumer group: ${groupName}`);
     } catch (error) {
       if (error.message.includes('BUSYGROUP')) {
-        console.log(`ℹ️ Consumer group ${groupName} already exists`);
+        // Consumer group already exists
       } else {
         console.error('❌ Error creating consumer group:', error);
         throw error;
@@ -150,7 +137,7 @@ export class RedisStreamManager {
   async acknowledgeMessage(streamName, groupName, messageId) {
     try {
       await this.redis.xack(streamName, groupName, messageId);
-      console.log(`✅ Acknowledged message: ${messageId}`);
+      // Message acknowledged
     } catch (error) {
       console.error('❌ Error acknowledging message:', error);
       throw error;

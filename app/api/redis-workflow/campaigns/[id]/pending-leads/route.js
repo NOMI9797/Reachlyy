@@ -1,7 +1,5 @@
 import { NextResponse } from "next/server";
-import { db } from "@/libs/db";
-import { leads, messages } from "@/libs/schema";
-import { eq, and, notExists } from "drizzle-orm";
+import getRedisClient from "@/libs/redis";
 
 /**
  * GET /api/redis-workflow/campaigns/[id]/pending-leads
@@ -26,36 +24,39 @@ export async function GET(request, { params }) {
       );
     }
 
-    console.log(`🔍 Redis Workflow: Fetching completed leads ready for message generation for campaign ${campaignId}`);
+    const redis = getRedisClient();
+    
+    // Get leads from Redis cache (no DB query)
+    const leadsData = await redis.hgetall(`campaign:${campaignId}:leads`);
+    
+    if (!leadsData || Object.keys(leadsData).length === 0) {
+      console.log(`📋 No leads found in Redis for campaign ${campaignId}`);
+      return NextResponse.json({
+        success: true,
+        data: {
+          campaignId,
+          leadsReadyForMessages: [],
+          count: 0,
+          workflow: "redis-first"
+        }
+      });
+    }
 
-    // Fetch completed leads that don't have messages yet
-    const leadsReadyForMessages = await db
-      .select()
-      .from(leads)
-      .where(
-        and(
-          eq(leads.campaignId, campaignId),
-          eq(leads.status, 'completed'),
-          notExists(
-            db.select().from(messages).where(eq(messages.leadId, leads.id))
-          )
-        )
-      );
-
-    console.log(`✅ Redis Workflow: Found ${leadsReadyForMessages.length} completed leads ready for message generation`);
+    const leads = Object.values(leadsData).map(leadStr => JSON.parse(leadStr));
+    console.log(`📋 Found ${leads.length} leads ready for messages`);
 
     return NextResponse.json({
       success: true,
       data: {
         campaignId,
-        leadsReadyForMessages,
-        count: leadsReadyForMessages.length,
-        workflow: "redis-stream"
+        leadsReadyForMessages: leads,
+        count: leads.length,
+        workflow: "redis-first"
       }
     });
 
   } catch (error) {
-    console.error("❌ Redis Workflow: Get pending leads error:", error);
+    console.error("❌ Error getting leads:", error);
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 }

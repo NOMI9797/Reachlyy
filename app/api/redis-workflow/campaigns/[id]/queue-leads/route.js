@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server";
-import { db } from "@/libs/db";
-import { leads, messages } from "@/libs/schema";
-import { eq, and, notExists } from "drizzle-orm";
 import { RedisStreamManager } from "@/libs/redis";
+import getRedisClient from "@/libs/redis";
 
 /**
  * POST /api/redis-workflow/campaigns/[id]/queue-leads
@@ -30,26 +28,16 @@ export async function POST(request, { params }) {
       );
     }
 
-    console.log(`🔄 Redis Workflow: Queueing completed leads for message generation for campaign ${campaignId}`);
-
-    // Fetch completed leads that don't have messages yet
-    const leadsReadyForMessages = await db
-      .select()
-      .from(leads)
-      .where(
-        and(
-          eq(leads.campaignId, campaignId),
-          eq(leads.status, 'completed'),
-          notExists(
-            db.select().from(messages).where(eq(messages.leadId, leads.id))
-          )
-        )
-      );
-
-    if (leadsReadyForMessages.length === 0) {
+    const redis = getRedisClient();
+    
+    // Get leads from Redis cache (no DB query)
+    const leadsData = await redis.hgetall(`campaign:${campaignId}:leads`);
+    
+    if (!leadsData || Object.keys(leadsData).length === 0) {
+      console.log(`📋 No leads found in Redis for campaign ${campaignId}`);
       return NextResponse.json({
         success: true,
-        message: "No completed leads found that need message generation for this campaign",
+        message: "No leads found in Redis cache for this campaign",
         data: {
           campaignId,
           leadsQueued: 0
@@ -57,17 +45,17 @@ export async function POST(request, { params }) {
       });
     }
 
-    // Initialize Redis stream manager
+    const leads = Object.values(leadsData).map(leadStr => JSON.parse(leadStr));
+    console.log(`📋 Found ${leads.length} leads ready for queuing`);
+
     const streamManager = new RedisStreamManager();
     const streamName = "leads-stream";
     const groupName = "message-generators";
 
-    // Create consumer group if it doesn't exist
     await streamManager.createConsumerGroup(streamName, groupName);
 
-    // Push leads to Redis stream
     const messageIds = [];
-    for (const lead of leadsReadyForMessages) {
+    for (const lead of leads) {
       const leadData = {
         campaign_id: campaignId,
         lead_id: lead.id,
@@ -81,26 +69,25 @@ export async function POST(request, { params }) {
 
       const messageId = await streamManager.addLeadToStream(streamName, leadData);
       messageIds.push(messageId);
-      console.log(`✅ Queued lead ${lead.id} to Redis stream: ${messageId}`);
     }
 
-    console.log(`🎉 Redis Workflow: Successfully queued ${leadsReadyForMessages.length} completed leads for message generation`);
+    console.log(`✅ Queued ${leads.length} leads to Redis stream`);
 
     return NextResponse.json({
       success: true,
-      message: `Successfully queued ${leadsReadyForMessages.length} completed leads for AI message generation`,
+      message: `Successfully queued ${leads.length} leads from Redis cache for AI message generation`,
       data: {
         campaignId,
-        leadsQueued: leadsReadyForMessages.length,
+        leadsQueued: leads.length,
         messageIds: messageIds,
         streamName: streamName,
         groupName: groupName,
-        workflow: "redis-stream"
+        workflow: "redis-first"
       }
     });
 
   } catch (error) {
-    console.error("❌ Redis Workflow: Queue leads error:", error);
+    console.error("❌ Error queuing leads:", error);
     return NextResponse.json(
       { error: "Internal server error", details: error.message },
       { status: 500 }
