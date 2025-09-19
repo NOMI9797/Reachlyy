@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
 import getRedisClient from "@/libs/redis";
+import { db } from "@/libs/db";
+import { messages } from "@/libs/schema";
+import { eq } from "drizzle-orm";
 
 export async function GET(request, { params }) {
   try {
@@ -30,7 +33,31 @@ export async function GET(request, { params }) {
     const leadsData = await redis.hgetall(`campaign:${campaignId}:leads`);
     const leads = Object.values(leadsData).map(leadStr => JSON.parse(leadStr));
 
-    console.log(`✅ Redis-First: Retrieved ${leads.length} leads from Redis for campaign ${campaignId}`);
+    // Get existing messages for these leads (bulk query)
+    const leadIds = leads.map(lead => lead.id);
+    let existingMessages = [];
+    
+    if (leadIds.length > 0) {
+      existingMessages = await db.select()
+        .from(messages)
+        .where(eq(messages.campaignId, campaignId));
+    }
+
+    // Create a map of leadId -> message for quick lookup
+    const messageMap = {};
+    existingMessages.forEach(message => {
+      messageMap[message.leadId] = message;
+    });
+
+    // Add message status to each lead
+    const leadsWithMessageStatus = leads.map(lead => ({
+      ...lead,
+      hasMessage: !!messageMap[lead.id],
+      messageId: messageMap[lead.id]?.id || null,
+      messageStatus: messageMap[lead.id]?.status || null
+    }));
+
+    console.log(`✅ Redis-First: Retrieved ${leads.length} leads (${existingMessages.length} with messages) from Redis for campaign ${campaignId}`);
 
     return NextResponse.json({
       success: true,
@@ -42,7 +69,7 @@ export async function GET(request, { params }) {
           leadsCount: parseInt(campaignData.leadsCount) || 0,
           lastUpdated: parseInt(campaignData.lastUpdated) || 0
         },
-        leads,
+        leads: leadsWithMessageStatus,
         workflow: "redis-first"
       }
     });
