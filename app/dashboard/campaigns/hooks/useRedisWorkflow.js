@@ -147,28 +147,7 @@ export function useRedisWorkflow() {
     });
   };
 
-  // Auto-process messages when queue has items
-  useEffect(() => {
-    const interval = setInterval(() => {
-      // Get all status queries from the cache
-      const allStatusQueries = queryClient.getQueriesData({ queryKey: ['redis-workflow-status'] });
-      
-      for (const [queryKey, statusData] of allStatusQueries) {
-        const queueLength = statusData?.data?.redis?.queueLength || 0;
-        
-        if (queueLength > 0 && !isProcessing && !processMessagesMutation.isPending) {
-          console.log(`🔄 Auto-processing ${queueLength} queued messages for campaign ${queryKey[1]}...`);
-          processMessagesMutation.mutate({
-            batchSize: 5,
-            consumerName: 'auto-worker'
-          });
-          break; // Only process one campaign at a time
-        }
-      }
-    }, 3000); // Process every 3 seconds
-
-    return () => clearInterval(interval);
-  }, [isProcessing, processMessagesMutation, queryClient]);
+  // Auto-processing removed - only process when user clicks "Generate Messages"
 
   // Queue all pending leads for a campaign
   const queueAllPendingLeads = useCallback(async (campaignId, options = {}) => {

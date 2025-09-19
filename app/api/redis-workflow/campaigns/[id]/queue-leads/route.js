@@ -97,48 +97,32 @@ export async function POST(request, { params }) {
 
     console.log(`📊 Current queue length: ${currentQueueLength}`);
 
-    // If auto-queue already worked, just return success immediately
-    if (currentQueueLength > 0) {
-      console.log(`🚀 AUTO-QUEUE: Leads already queued by auto-queue system!`);
-      return NextResponse.json({
-        success: true,
-        message: `Leads already queued by auto-queue system (${currentQueueLength} in queue)`,
-        data: {
-          campaignId,
-          leadsQueued: currentQueueLength,
-          totalLeads: allLeads.length,
-          leadsWithMessages: allLeads.length - leadsNeedingMessages.length,
-          streamName: streamName,
-          groupName: groupName,
-          workflow: "redis-first-auto-queue",
-          autoQueued: true
-        }
+    // Directly enqueue leads now for immediate availability
+    const streamManager = new RedisStreamManager();
+    await streamManager.createConsumerGroup(streamName, groupName);
+
+    let enqueued = 0;
+    for (const lead of leadsNeedingMessages) {
+      await streamManager.addLeadToStream(streamName, {
+        lead_id: lead.id,
+        campaign_id: campaignId,
+        name: lead.name || "",
+        title: lead.title || "",
+        company: lead.company || "",
+        model: model,
+        custom_prompt: customPrompt || "",
       });
+      enqueued++;
     }
 
-    // If not auto-queued, trigger auto-queue in background and return immediately
-    console.log(`🚀 Triggering auto-queue for ${leadsNeedingMessages.length} leads...`);
-    
-    // Trigger auto-queue in background (don't wait for response)
-    fetch(`${process.env.NEXTAUTH_URL || 'http://localhost:8085'}/api/redis-workflow/campaigns/${campaignId}/auto-queue`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ 
-        model: model,
-        customPrompt: customPrompt || ""
-      })
-    }).catch(error => {
-      console.log(`⚠️ Auto-queue background call failed: ${error.message}`);
-    });
-
-    console.log(`✅ Queued ${leadsNeedingMessages.length} leads to Redis stream (skipped ${allLeads.length - leadsNeedingMessages.length} with existing messages)`);
+    console.log(`✅ Enqueued ${enqueued} leads to Redis stream (skipped ${allLeads.length - leadsNeedingMessages.length} with existing messages)`);
 
     return NextResponse.json({
       success: true,
-      message: `Successfully queued ${leadsNeedingMessages.length} leads for AI message generation (${allLeads.length - leadsNeedingMessages.length} already had messages)`,
+      message: `Successfully enqueued ${enqueued} leads for AI message generation (${allLeads.length - leadsNeedingMessages.length} already had messages)`,
       data: {
         campaignId,
-        leadsQueued: leadsNeedingMessages.length,
+        leadsQueued: enqueued,
         totalLeads: allLeads.length,
         leadsWithMessages: allLeads.length - leadsNeedingMessages.length,
         streamName: streamName,

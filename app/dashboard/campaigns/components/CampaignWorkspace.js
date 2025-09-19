@@ -39,6 +39,7 @@ export default function CampaignWorkspace({ campaign, onBack }) {
   const {
     isProcessing,
     queueAllPendingLeads,
+    processMessages,
     useLeadsReadyForMessages,
     useGenerationStatus,
     isQueueing,

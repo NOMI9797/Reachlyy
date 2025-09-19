@@ -23,7 +23,7 @@ export async function POST(request) {
     const streamManager = new RedisStreamManager();
     const redis = getRedisClient();
     
-    const LEADS_STREAM_NAME = 'leads-stream';
+    const LEADS_STREAM_NAME = 'leads:message-generation';
     const CONSUMER_GROUP_NAME = 'message-generators';
     const CONSUMER_NAME = process.env.WORKER_ID || 'default-worker';
 
