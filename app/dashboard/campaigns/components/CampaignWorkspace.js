@@ -416,7 +416,7 @@ export default function CampaignWorkspace({ campaign, onBack }) {
                          `Generate Messages (${leadsReadyCount || completedLeadsCount})`}
                       </button>
                       <div className="text-xs text-base-content/60">
-                        Generate personalized messages for all completed leads that don't have messages yet.
+                        Generate personalized messages for all completed leads that don&apos;t have messages yet.
                       </div>
                       
                       {/* Redis Workflow Status */}
@@ -550,10 +550,10 @@ export default function CampaignWorkspace({ campaign, onBack }) {
           <div className="bg-base-100 rounded-lg p-6 max-w-md mx-4">
             <h3 className="font-bold text-lg mb-4">Generate Messages for All Completed Leads</h3>
             <p className="text-base-content/80 mb-4">
-              This will generate personalized messages for {leadsReadyCount || completedLeadsCount} completed lead{(leadsReadyCount || completedLeadsCount) > 1 ? 's' : ''} that don't have messages yet.
+              This will generate personalized messages for {leadsReadyCount || completedLeadsCount} completed lead{(leadsReadyCount || completedLeadsCount) > 1 ? 's' : ''} that don&apos;t have messages yet.
             </p>
             <p className="text-sm text-base-content/60 mb-6">
-              Each message will be generated based on the lead's scraped posts and engagement data using the {aiSettings.model} model. This process may take a few minutes.
+              Each message will be generated based on the lead&apos;s scraped posts and engagement data using the {aiSettings.model} model. This process may take a few minutes.
             </p>
             <div className="flex gap-3 justify-end">
               <button
