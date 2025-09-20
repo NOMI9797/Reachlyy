@@ -28,10 +28,11 @@ export const POST = withAuth(async (request, { user }) => {
 
     console.log(`🚀 PRE-FETCH START: Starting bulk pre-fetch for user ${userId}`);
     
-    // Bulk fetch ALL campaigns (since there's no userId column in campaigns table)
+    // Bulk fetch campaigns for the authenticated user
     console.log(`📊 PRE-FETCH STEP 1: Fetching campaigns from database...`);
     const userCampaigns = await db.select()
-      .from(campaigns);
+      .from(campaigns)
+      .where(eq(campaigns.userId, user.id));
 
     console.log(`📊 PRE-FETCH STEP 1: Found ${userCampaigns.length} campaigns in database`);
 
@@ -56,13 +57,13 @@ export const POST = withAuth(async (request, { user }) => {
       
       const campaignLeads = await db.select()
         .from(leads)
-        .where(eq(leads.campaignId, campaign.id))
+        .where(and(eq(leads.campaignId, campaign.id), eq(leads.userId, user.id)))
         .limit(1000); // Bulk fetch up to 1000 leads per campaign
 
       // Get existing messages for this campaign
       const campaignMessages = await db.select()
         .from(messages)
-        .where(eq(messages.campaignId, campaign.id));
+        .where(and(eq(messages.campaignId, campaign.id), eq(messages.userId, user.id)));
 
       console.log(`📦 PRE-FETCH: ${campaign.name} (${campaign.id}) → ${campaignLeads.length} leads, ${campaignMessages.length} messages`);
 
@@ -79,6 +80,9 @@ export const POST = withAuth(async (request, { user }) => {
       // Store leads data in Redis (bulk)
       if (campaignLeads.length > 0) {
         const leadsData = {};
+        // Create a set of lead IDs that have messages
+        const leadsWithMessages = new Set(campaignMessages.map(msg => msg.leadId));
+        
         campaignLeads.forEach(lead => {
           leadsData[lead.id] = JSON.stringify({
             id: lead.id,
@@ -86,7 +90,8 @@ export const POST = withAuth(async (request, { user }) => {
             title: lead.title,
             company: lead.company,
             url: lead.url,
-            status: lead.status
+            status: lead.status,
+            hasMessage: leadsWithMessages.has(lead.id) // Include message status
           });
         });
         
