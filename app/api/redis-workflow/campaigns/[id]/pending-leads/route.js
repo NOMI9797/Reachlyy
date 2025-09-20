@@ -30,8 +30,12 @@ export async function GET(request, { params }) {
 
     const redis = getRedisClient();
     
-    // Get leads from Redis cache (no DB query)
-    const leadsData = await redis.hgetall(`campaign:${campaignId}:leads`);
+    // Use Redis pipeline for single round trip (though only one call here, keeping consistent pattern)
+    const pipeline = redis.pipeline();
+    pipeline.hgetall(`campaign:${campaignId}:leads`);
+    
+    const results = await pipeline.exec();
+    const leadsData = results[0][1]; // [error, result] format
     
     if (!leadsData || Object.keys(leadsData).length === 0) {
       // No leads found in Redis cache

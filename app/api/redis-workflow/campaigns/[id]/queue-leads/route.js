@@ -32,9 +32,21 @@ export async function POST(request, { params }) {
     // Queueing leads for message generation
 
     const redis = getRedisClient();
+    const streamName = `campaign:${campaignId}:message-generation`;
+    const groupName = "message-generators";
     
-    // Get leads from Redis cache (no DB query)
-    const leadsData = await redis.hgetall(`campaign:${campaignId}:leads`);
+    // Use Redis pipeline to batch multiple calls into single round trip
+    const pipeline = redis.pipeline();
+    pipeline.hgetall(`campaign:${campaignId}:leads`);
+    pipeline.exists(streamName);
+    pipeline.xinfo('GROUPS', streamName);
+    
+    const results = await pipeline.exec();
+    
+    // Extract results from pipeline
+    const leadsData = results[0][1]; // [error, result] format
+    const streamExists = results[1][1];
+    const groupInfo = results[2][1];
     
     if (!leadsData || Object.keys(leadsData).length === 0) {
       // No leads found in Redis cache
@@ -75,23 +87,15 @@ export async function POST(request, { params }) {
       });
     }
 
-    // Check current queue length to see if auto-queue already worked
-    const streamName = `campaign:${campaignId}:message-generation`;
-    const groupName = "message-generators";
-    
+    // Get current queue length from pipeline results
     let currentQueueLength = 0;
     try {
-      // Check if stream exists first
-      const streamExists = await redis.exists(streamName);
-      if (streamExists) {
-        const groupInfo = await redis.xinfo('GROUPS', streamName);
-        if (groupInfo && groupInfo.length > 0) {
-          for (let i = 0; i < groupInfo.length; i++) {
-            const group = groupInfo[i];
-            if (group[1] === groupName) {
-              currentQueueLength = parseInt(group[9]) || 0;
-              break;
-            }
+      if (streamExists && groupInfo && groupInfo.length > 0) {
+        for (let i = 0; i < groupInfo.length; i++) {
+          const group = groupInfo[i];
+          if (group[1] === groupName) {
+            currentQueueLength = parseInt(group[9]) || 0;
+            break;
           }
         }
       }

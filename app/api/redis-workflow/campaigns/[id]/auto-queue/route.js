@@ -25,11 +25,15 @@ export async function POST(request, { params }) {
     const STREAM_NAME = `campaign:${campaignId}:message-generation`;
     const GROUP_NAME = "message-generators";
 
+    // Use Redis pipeline to batch calls
+    const pipeline = redis.pipeline();
+    pipeline.hgetall(`campaign:${campaignId}:leads`);
+    
+    const results = await pipeline.exec();
+    const leadsData = results[0][1]; // [error, result] format
+
     // Ensure consumer group exists (creates stream if missing)
     await streamManager.createConsumerGroup(STREAM_NAME, GROUP_NAME);
-
-    // Read leads cache
-    const leadsData = await redis.hgetall(`campaign:${campaignId}:leads`);
     if (!leadsData || Object.keys(leadsData).length === 0) {
       return NextResponse.json({
         success: true,

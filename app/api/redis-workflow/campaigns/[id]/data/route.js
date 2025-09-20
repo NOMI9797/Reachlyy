@@ -19,8 +19,16 @@ export async function GET(request, { params }) {
 
     const redis = getRedisClient();
     
-    // Get campaign data from Redis
-    const campaignData = await redis.hgetall(`campaign:${campaignId}:data`);
+    // Use Redis pipeline to batch multiple calls into single round trip
+    const pipeline = redis.pipeline();
+    pipeline.hgetall(`campaign:${campaignId}:data`);
+    pipeline.hgetall(`campaign:${campaignId}:leads`);
+    
+    const results = await pipeline.exec();
+    
+    // Extract results from pipeline
+    const campaignData = results[0][1]; // [error, result] format
+    const leadsData = results[1][1];
     
     if (!campaignData || Object.keys(campaignData).length === 0) {
       return NextResponse.json(
@@ -29,8 +37,6 @@ export async function GET(request, { params }) {
       );
     }
 
-    // Get leads data from Redis
-    const leadsData = await redis.hgetall(`campaign:${campaignId}:leads`);
     const leads = Object.values(leadsData).map(leadStr => JSON.parse(leadStr));
 
     // Get existing messages for these leads (bulk query)

@@ -29,10 +29,23 @@ export async function GET(request, { params }) {
     // Getting generation status
 
     const redis = getRedisClient();
+    const streamName = `campaign:${campaignId}:message-generation`;
+    const groupName = "message-generators";
     
-    // Get campaign data from Redis cache (no DB queries)
-    const campaignData = await redis.hgetall(`campaign:${campaignId}:data`);
-    const leadsData = await redis.hgetall(`campaign:${campaignId}:leads`);
+    // Use Redis pipeline to batch multiple calls into single round trip
+    const pipeline = redis.pipeline();
+    pipeline.hgetall(`campaign:${campaignId}:data`);
+    pipeline.hgetall(`campaign:${campaignId}:leads`);
+    pipeline.exists(streamName);
+    pipeline.xinfo('GROUPS', streamName);
+    
+    const results = await pipeline.exec();
+    
+    // Extract results from pipeline
+    const campaignData = results[0][1]; // [error, result] format
+    const leadsData = results[1][1];
+    const streamExists = results[2][1];
+    const groupInfo = results[3][1];
     
     if (!leadsData || Object.keys(leadsData).length === 0) {
       console.log(`📋 No leads found in Redis for campaign ${campaignId}`);
@@ -42,7 +55,7 @@ export async function GET(request, { params }) {
           campaignId,
           leads: { pending: 0, completed: 0, error: 0, total: 0 },
           messages: { total: 0 },
-          redis: { queueLength: 0, streamName: `campaign:${campaignId}:message-generation`, groupName: "message-generators" },
+          redis: { queueLength: 0, streamName: streamName, groupName: groupName },
           workflow: "redis-first",
           timestamp: Date.now()
         }
@@ -58,23 +71,15 @@ export async function GET(request, { params }) {
 
     // Found leads ready for messages
 
-    // Get Redis stream queue length first
-    const streamName = `campaign:${campaignId}:message-generation`;
-    const groupName = "message-generators";
-    
+    // Get Redis stream queue length from pipeline results
     let streamLength = 0;
     try {
-      // Check if stream exists first
-      const streamExists = await redis.exists(streamName);
-      if (streamExists) {
-        const groupInfo = await redis.xinfo('GROUPS', streamName);
-        if (groupInfo && groupInfo.length > 0) {
-          for (let i = 0; i < groupInfo.length; i++) {
-            const group = groupInfo[i];
-            if (group[1] === groupName) {
-              streamLength = parseInt(group[9]) || 0;
-              break;
-            }
+      if (streamExists && groupInfo && groupInfo.length > 0) {
+        for (let i = 0; i < groupInfo.length; i++) {
+          const group = groupInfo[i];
+          if (group[1] === groupName) {
+            streamLength = parseInt(group[9]) || 0;
+            break;
           }
         }
       }
@@ -88,15 +93,19 @@ export async function GET(request, { params }) {
       if (streamLength === 0) {
         // Circuit breaker: Check if auto-queue was recently attempted
         const autoQueueKey = `auto-queue:${campaignId}:attempt`;
-        const lastAttempt = await redis.get(autoQueueKey);
         const now = Date.now();
         const cooldownPeriod = 30000; // 30 seconds cooldown
         
+        // Use pipeline for auto-queue check and set
+        const autoQueuePipeline = redis.pipeline();
+        autoQueuePipeline.get(autoQueueKey);
+        autoQueuePipeline.setex(autoQueueKey, 60, now.toString());
+        
+        const autoQueueResults = await autoQueuePipeline.exec();
+        const lastAttempt = autoQueueResults[0][1];
+        
         if (!lastAttempt || (now - parseInt(lastAttempt)) > cooldownPeriod) {
           try {
-            // Set attempt timestamp
-            await redis.setex(autoQueueKey, 60, now.toString());
-            
             // Trigger auto-queue in background (don't wait for response)
             fetch(`${process.env.NEXTAUTH_URL || 'http://localhost:8085'}/api/redis-workflow/campaigns/${campaignId}/auto-queue`, {
               method: 'POST',
@@ -109,19 +118,19 @@ export async function GET(request, { params }) {
               console.log(`⚠️ Auto-queue background call failed: ${error.message}`);
             });
             
-            // Auto-queue triggered successfully
+            console.log(`🚀 Auto-queue triggered for campaign ${campaignId}`);
           } catch (error) {
             console.log(`⚠️ Auto-queue trigger failed: ${error.message}`);
           }
         } else {
           const timeLeft = Math.ceil((cooldownPeriod - (now - parseInt(lastAttempt))) / 1000);
-          // Auto-queue skipped due to cooldown
+          console.log(`⏳ Auto-queue skipped due to cooldown (${timeLeft}s remaining)`);
         }
       } else {
-        // Auto-queue skipped - queue already has items
+        console.log(`⏭️ Auto-queue skipped - queue already has ${streamLength} items`);
       }
     } else {
-      // Auto-queue skipped - no leads need messages
+      console.log(`✅ Auto-queue skipped - no leads need messages`);
     }
 
     const leadsCount = Object.keys(leadsData).length;
