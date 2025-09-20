@@ -139,7 +139,17 @@ export function useRedisWorkflow() {
       queryKey: ['redis-workflow-leads-ready', campaignId],
       queryFn: () => getLeadsReadyForMessages(campaignId),
       enabled: !!campaignId,
-      refetchInterval: 5000, // Refetch every 5 seconds
+      refetchInterval: (data) => {
+        // Stop polling if no leads are ready for messages
+        if (data?.data?.count === 0) {
+          console.log(`✅ LEADS POLLING: No leads ready - STOPPING polling`);
+          return false; // Stop polling
+        }
+        
+        // Continue polling every 5s if there are leads ready
+        console.log(`🔄 LEADS POLLING: ${data?.data?.count || 0} leads ready - polling every 5s`);
+        return 5000;
+      },
     });
   };
 
@@ -164,15 +174,15 @@ export function useRedisWorkflow() {
           return 2000;
         }
         
-        // Idle state: Poll every 10s when no active work
+        // Idle state: Poll every 10s when no active work but has completed leads
         if (hasCompletedLeads) {
           console.log(`⏸️ SMART POLLING: Idle state - polling every 10s (completed: ${leads.completed})`);
           return 10000;
         }
         
-        // Stable state: Poll every 30s when all done
-        console.log(`✅ SMART POLLING: Stable state - polling every 30s`);
-        return 30000;
+        // Stable state: STOP POLLING when everything is done
+        console.log(`✅ SMART POLLING: Stable state - STOPPING polling (no active work)`);
+        return false; // Stop polling completely
       },
     });
   };
