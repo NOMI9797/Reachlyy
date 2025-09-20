@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@/libs/db";
-import { leads, campaigns, posts } from "@/libs/schema";
+import { leads, posts } from "@/libs/schema";
 import { eq, desc, and } from "drizzle-orm";
 import { withAuth } from "@/libs/auth-middleware";
 

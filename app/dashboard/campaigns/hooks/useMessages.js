@@ -164,8 +164,11 @@ export function useMessages() {
 
       let buffer = '';
 
-      while (true) {
-        const { done, value } = await reader.read();
+      let done = false;
+      while (!done) {
+        const result = await reader.read();
+        done = result.done;
+        const value = result.value;
         if (done) break;
 
         buffer += decoder.decode(value, { stream: true });

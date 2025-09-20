@@ -40,7 +40,7 @@ export const GET = withAuth(async (request, { user }) => {
   }
 });
 
-export const DELETE = withAuth(async (request, { user }) => {
+export const DELETE = withAuth(async (request) => {
   try {
     const { sessionId } = await request.json();
 

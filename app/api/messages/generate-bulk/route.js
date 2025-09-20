@@ -226,7 +226,7 @@ export async function GET(request) {
     }
 
     // Get statistics for the campaign
-    const completedLeadsCountResult = await db
+    await db
       .select({ count: count(leads.id) })
       .from(leads)
       .where(

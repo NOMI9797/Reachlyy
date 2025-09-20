@@ -42,17 +42,17 @@ export const DELETE = withAuth(async (request, { user }) => {
       const errorLeadIds = errorLeads.map(lead => lead.id);
 
       // Delete related posts (cascade should handle this, but being explicit)
-      const deletedPosts = await tx
+      await tx
         .delete(posts)
         .where(eq(posts.leadId, errorLeadIds[0])); // Drizzle doesn't support inArray for delete, so we'll do it one by one
 
       // Delete related messages (cascade should handle this, but being explicit)
-      const deletedMessages = await tx
+      await tx
         .delete(messages)
         .where(eq(messages.leadId, errorLeadIds[0])); // Drizzle doesn't support inArray for delete, so we'll do it one by one
 
       // Delete the error leads
-      const deletedLeads = await tx
+      await tx
         .delete(leads)
         .where(
           and(
