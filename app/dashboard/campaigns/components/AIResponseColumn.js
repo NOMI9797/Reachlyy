@@ -31,6 +31,7 @@ const AIResponseColumn = memo(function AIResponseColumn({
     generatedMessage,
     setGeneratedMessage,
     isGenerating,
+    isStreaming,
     messageHistory,
     copiedStates,
     error,
@@ -123,7 +124,7 @@ const AIResponseColumn = memo(function AIResponseColumn({
               {isGenerating ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  Generating...
+                  {isStreaming ? "Streaming..." : "Generating..."}
                 </>
               ) : (
                 <>
@@ -134,20 +135,23 @@ const AIResponseColumn = memo(function AIResponseColumn({
             </button>
 
             {/* Current Generated Message */}
-            {generatedMessage && (
+            {(generatedMessage || isStreaming) && (
               <div className="card bg-base-100 border border-base-300">
                 <div className="card-body p-4">
                   <div className="flex items-center justify-between mb-3">
-                    <h3 className="card-title text-sm">Generated Message</h3>
+                    <h3 className="card-title text-sm">
+                      {isStreaming ? "Generating Message..." : "Generated Message"}
+                    </h3>
                     <div className="flex gap-1">
                       <button
-                        onClick={() => copyToClipboard(generatedMessage, "current")}
+                        onClick={() => copyToClipboard(generatedMessage || "", "current")}
+                        disabled={!generatedMessage}
                         className={`btn btn-ghost btn-xs btn-circle ${
                           copiedStates.has("current")
                             ? "text-success bg-success/10"
                             : ""
-                        }`}
-                        title={copiedStates.has("current") ? "Copied!" : "Copy message"}
+                        } ${!generatedMessage ? "opacity-50 cursor-not-allowed" : ""}`}
+                        title={generatedMessage ? (copiedStates.has("current") ? "Copied!" : "Copy message") : "No message to copy"}
                       >
                         {copiedStates.has("current") ? (
                           <Check className="h-3 w-3" />
@@ -164,14 +168,17 @@ const AIResponseColumn = memo(function AIResponseColumn({
                       </button>
                     </div>
                   </div>
-                  <div className="p-3 bg-base-200 rounded-lg text-sm leading-relaxed">
+                  <div className="p-3 bg-base-200 rounded-lg text-sm leading-relaxed min-h-[60px]">
                     {generatedMessage}
+                    {isStreaming && (
+                      <span className="inline-block ml-1 animate-pulse">...</span>
+                    )}
                   </div>
                   <div className="flex items-center justify-between mt-3 text-xs text-base-content/60">
                     <span>
                       Model: {models.find((m) => m.value === aiSettings?.model)?.label || aiSettings?.model || "llama-3.1-8b-instant"}
                     </span>
-                    <span>{generatedMessage.length} characters</span>
+                    <span>{generatedMessage?.length || 0} characters</span>
                   </div>
                 </div>
               </div>

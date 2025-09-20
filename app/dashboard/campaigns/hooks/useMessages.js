@@ -15,6 +15,7 @@ export function useMessages() {
   const [currentLeadId, setCurrentLeadId] = useState(null);
   const [generatedMessage, setGeneratedMessage] = useState("");
   const [copiedStates, setCopiedStates] = useState(new Set());
+  const [isStreaming, setIsStreaming] = useState(false);
 
   // Available AI models
   const models = [
@@ -111,25 +112,107 @@ export function useMessages() {
 
     setCurrentLeadId(leadId);
 
-    // Set the most recent message as the current displayed message if available
-    const cachedMessages = queryClient.getQueryData(messageKeys.forLead(leadId));
-    if (cachedMessages && cachedMessages.length > 0) {
-      setGeneratedMessage(cachedMessages[0].content);
+    // Only set cached message if we're not currently streaming
+    if (!isStreaming) {
+      const cachedMessages = queryClient.getQueryData(messageKeys.forLead(leadId));
+      if (cachedMessages && cachedMessages.length > 0) {
+        setGeneratedMessage(cachedMessages[0].content);
+      }
     }
   };
 
-  // Generate a new message
+  // Generate a new message with streaming
   const generateMessage = async (leadId, aiSettings = {}) => {
     if (!leadId) {
       toast.error("No lead selected");
       return false;
     }
 
-    return generateMessageMutation.mutateAsync({
-      leadId,
-      model: aiSettings?.model || "llama-3.1-8b-instant",
-      customPrompt: aiSettings?.customPrompt || "",
-    });
+    try {
+      setIsStreaming(true);
+      // Force clear the message and ensure it's empty
+      setGeneratedMessage("");
+      
+      // Small delay to ensure state is updated
+      await new Promise(resolve => setTimeout(resolve, 50));
+      
+      const response = await fetch('/api/messages/generate-stream', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          leadId,
+          model: aiSettings?.model || "llama-3.1-8b-instant",
+          customPrompt: aiSettings?.customPrompt || "",
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to start message generation');
+      }
+
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+
+      if (!reader) {
+        throw new Error('Response body is not readable');
+      }
+
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || ''; // Keep incomplete line in buffer
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              
+              if (data.type === 'start') {
+                // Initial start message - ensure message is empty
+                setGeneratedMessage("");
+              } else if (data.type === 'chunk') {
+                // Ensure we're building from scratch, not appending to existing
+                setGeneratedMessage(prev => {
+                  // If this is the first chunk, start fresh
+                  if (prev === "") {
+                    return data.content;
+                  }
+                  return prev + data.content;
+                });
+              } else if (data.type === 'done') {
+                // Message completed, refresh history
+                if (currentLeadId) {
+                  queryClient.invalidateQueries({ queryKey: messageKeys.forLead(currentLeadId) });
+                }
+                toast.success("Message generated successfully!");
+                setIsStreaming(false);
+                return true;
+              } else if (data.type === 'error') {
+                throw new Error(data.error);
+              }
+            } catch (parseError) {
+              console.error('Error parsing SSE data:', parseError);
+            }
+          }
+        }
+      }
+
+      setIsStreaming(false);
+      return true;
+    } catch (error) {
+      console.error('Streaming error:', error);
+      setGeneratedMessage("Error: Failed to generate message - " + error.message);
+      toast.error(`Failed to generate message: ${error.message}`);
+      setIsStreaming(false);
+      return false;
+    }
   };
 
   // Copy text to clipboard
@@ -205,7 +288,8 @@ export function useMessages() {
     // State
     generatedMessage,
     setGeneratedMessage,
-    isGenerating: generateMessageMutation.isPending,
+    isGenerating: generateMessageMutation.isPending || isStreaming,
+    isStreaming,
     messageHistory,
     copiedStates,
     error: historyError?.message || generateMessageMutation.error?.message || null,
