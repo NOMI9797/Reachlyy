@@ -99,6 +99,26 @@ export function useLinkedInAccounts() {
     },
   });
 
+  // Test account session mutation
+  const testAccountSessionMutation = useMutation({
+    mutationFn: linkedinAccountApi.testAccountSession,
+    onSuccess: (result, sessionId) => {
+      console.log(`Session test result for ${sessionId}:`, result);
+      
+      // If session is invalid, update the account status in cache
+      if (!result.isValid) {
+        queryClient.setQueryData(linkedinAccountKeys.lists(), (oldAccounts = []) =>
+          oldAccounts.map(account => 
+            account.id === sessionId ? { ...account, isActive: false } : account
+          )
+        );
+      }
+    },
+    onError: (error) => {
+      console.error("Failed to test account session:", error);
+    },
+  });
+
   // Connect account function
   const connectAccount = async () => {
     return connectAccountMutation.mutateAsync();
@@ -117,6 +137,11 @@ export function useLinkedInAccounts() {
   // Update account settings function
   const updateAccountSettings = async (accountId, settings) => {
     return updateAccountSettingsMutation.mutateAsync({ accountId, settings });
+  };
+
+  // Test account session function
+  const testAccountSession = async (sessionId) => {
+    return testAccountSessionMutation.mutateAsync(sessionId);
   };
 
   // Refresh accounts
@@ -147,11 +172,13 @@ export function useLinkedInAccounts() {
     toggleAccountStatus,
     deleteAccount,
     updateAccountSettings,
+    testAccountSession,
     refreshAccounts,
     // Additional React Query specific properties
     isConnecting: connectAccountMutation.isPending,
     isToggling: toggleAccountStatusMutation.isPending,
     isDeleting: deleteAccountMutation.isPending,
     isUpdating: updateAccountSettingsMutation.isPending,
+    isTesting: testAccountSessionMutation.isPending,
   };
 }

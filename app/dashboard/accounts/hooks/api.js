@@ -91,4 +91,23 @@ export const linkedinAccountApi = {
 
     return result;
   },
+
+  // Test account session validity
+  testAccountSession: async (sessionId) => {
+    const response = await fetch("/api/linkedin/accounts/test-session", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ sessionId }),
+    });
+
+    const result = await response.json();
+
+    if (!result.success) {
+      throw new Error(result.message || "Failed to test account session");
+    }
+
+    return result;
+  },
 };

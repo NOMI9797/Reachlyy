@@ -20,6 +20,7 @@ import {
   MessageSquare,
   X,
   Shield,
+  TestTube2,
 } from "lucide-react";
 
 export default function AccountsPage() {
@@ -38,7 +39,9 @@ export default function AccountsPage() {
     loading: isLoadingAccounts,
     connectAccount,
     toggleAccountStatus,
+    testAccountSession,
     isConnecting,
+    isTesting,
   } = useLinkedInAccounts();
 
   // Helper function to show toast
@@ -109,6 +112,20 @@ export default function AccountsPage() {
       await toggleAccountStatus(accountId, isActive);
     } catch (error) {
       showToast(`Error: ${error.message || 'Failed to update account status'}`, 'error');
+    }
+  };
+
+  const handleTestSession = async (accountId) => {
+    try {
+      const result = await testAccountSession(accountId);
+      
+      if (result.isValid) {
+        showToast('✅ Session is valid and working!', 'success', 3000);
+      } else {
+        showToast(`❌ Session is invalid: ${result.reason}`, 'error', 5000);
+      }
+    } catch (error) {
+      showToast(`Error testing session: ${error.message}`, 'error');
     }
   };
 
@@ -335,6 +352,21 @@ export default function AccountsPage() {
                           <button className="btn btn-ghost btn-sm btn-circle" title="Edit">
                             <Edit className="h-4 w-4" />
                           </button>
+                          {/* Test Session Button - Only show for active accounts */}
+                          {account.isActive && (
+                            <button 
+                              className="btn btn-ghost btn-sm btn-circle" 
+                              title="Test Session Validity"
+                              onClick={() => handleTestSession(account.id)}
+                              disabled={isTesting}
+                            >
+                              {isTesting ? (
+                                <div className="loading loading-spinner loading-xs"></div>
+                              ) : (
+                                <TestTube2 className="h-4 w-4" />
+                              )}
+                            </button>
+                          )}
                            <div className="dropdown dropdown-end">
                              <button className="btn btn-ghost btn-sm btn-circle" title="More actions">
                                <MoreHorizontal className="h-4 w-4" />
