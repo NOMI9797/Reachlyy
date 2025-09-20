@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { ArrowLeft, Settings, Maximize2, Minimize2, Zap, Target, MessageSquare, BarChart3, Loader2 } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
 import LeadsColumn from "./LeadsColumn";
 import PostsColumn from "./PostsColumn";
 import AIResponseColumn from "./AIResponseColumn";
@@ -10,6 +11,7 @@ import { useBulkMessageGeneration } from "../hooks/useBulkMessageGeneration";
 import { useRedisWorkflow } from "../hooks/useRedisWorkflow";
 
 export default function CampaignWorkspace({ campaign, onBack }) {
+  const queryClient = useQueryClient();
   const [selectedLead, setSelectedLead] = useState(null);
   const {
     leads,
@@ -70,15 +72,32 @@ export default function CampaignWorkspace({ campaign, onBack }) {
   // Handle Redis workflow message generation
   const handleBulkGenerateMessages = async () => {
     try {
-      // Process messages for the current campaign only
+      // Step 1: Queue all pending leads first
+      await queueAllPendingLeads(campaign.id, {
+        model: aiSettings.model,
+        customPrompt: aiSettings.customPrompt
+      });
+      
+      // Step 2: Process messages for the current campaign
       await processMessages({
         batchSize: 5,
         consumerName: 'manual-generate',
         campaignId: campaign.id
       });
       setShowBulkMessageDialog(false);
+      
+      // Invalidate all related React Query caches
+      queryClient.invalidateQueries({ queryKey: ['campaigns'] });
+      queryClient.invalidateQueries({ queryKey: ['leads'] });
+      queryClient.invalidateQueries({ queryKey: ['messages'] });
+      queryClient.invalidateQueries({ queryKey: ['redis-workflow-status'] });
+      queryClient.invalidateQueries({ queryKey: ['redis-workflow-leads'] });
+      
+      // Refresh leads to show updated message counts
+      await refreshLeads();
     } catch (error) {
-      console.error('Error in Redis workflow message generation:', error);
+      console.error('❌ Error in Redis workflow message generation:', error);
+      alert(`Error: ${error.message}`);
     }
   };
 

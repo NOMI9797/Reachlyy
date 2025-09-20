@@ -119,6 +119,7 @@ export const POST = withAuth(async (request, { user }) => {
           messagesToInsert.push({
             leadId: leadData.lead_id,
             campaignId: leadData.campaign_id,
+            userId: user.id, // Add the authenticated user ID
             content: aiMessage,
             model: leadData.model || "llama-3.1-8b-instant",
             customPrompt: leadData.custom_prompt || "",
@@ -164,6 +165,7 @@ export const POST = withAuth(async (request, { user }) => {
               id: message.id || `temp-${Date.now()}-${message.leadId}`, // Use temp ID if not available
               leadId: message.leadId,
               campaignId: message.campaignId,
+              userId: message.userId, // Include userId for consistency
               content: message.content,
               model: message.model,
               customPrompt: message.customPrompt,

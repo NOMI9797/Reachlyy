@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@/libs/db";
-import { campaigns, leads } from "@/libs/schema";
+import { campaigns, leads, messages } from "@/libs/schema";
 import { eq, and } from "drizzle-orm";
 import { withAuth } from "@/libs/auth-middleware";
 
@@ -147,19 +147,63 @@ export const POST = withAuth(async (request, { params, user }) => {
     // Refresh Redis cache for this campaign after adding leads
     console.log(`🔄 CACHE REFRESH: Triggering cache refresh for campaign ${campaignId} after adding leads`);
     try {
-      const refreshResponse = await fetch(`${process.env.NEXTAUTH_URL || 'http://localhost:8085'}/api/redis-workflow/campaigns/${campaignId}/refresh-cache`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
-      });
+      // Import the refresh cache logic directly to avoid auth issues
+      const getRedisClient = require('@/libs/redis').default;
+      const redis = getRedisClient();
       
-      if (refreshResponse.ok) {
-        const refreshData = await refreshResponse.json();
-        console.log(`✅ CACHE REFRESH: Successfully refreshed cache for campaign ${campaignId}: ${refreshData.data.leadsCount} leads cached`);
+      // Fetch fresh campaign data from DB (user-filtered)
+      const [campaign] = await db.select()
+        .from(campaigns)
+        .where(and(eq(campaigns.id, campaignId), eq(campaigns.userId, user.id)))
+        .limit(1);
+        
+      if (!campaign) {
+        console.log(`⚠️ CACHE REFRESH: Campaign ${campaignId} not found or not owned by user`);
       } else {
-        console.log(`⚠️ CACHE REFRESH: Failed to refresh cache for campaign ${campaignId}: ${refreshResponse.status}`);
+        const campaignLeads = await db.select()
+          .from(leads)
+          .where(and(eq(leads.campaignId, campaignId), eq(leads.userId, user.id)));
+          
+        const campaignMessages = await db.select()
+          .from(messages)
+          .where(and(eq(messages.campaignId, campaignId), eq(messages.userId, user.id)));
+        
+        // Update campaign data in Redis
+        await redis.hset(`campaign:${campaignId}:data`, {
+          id: campaign.id,
+          name: campaign.name,
+          status: campaign.status,
+          leadsCount: campaignLeads.length,
+          messagesCount: campaignMessages.length,
+          lastUpdated: Date.now()
+        });
+        
+        // Update leads in Redis with hasMessage status
+        if (campaignLeads.length > 0) {
+          const leadsData = {};
+          const leadsWithMessages = new Set(campaignMessages.map(msg => msg.leadId));
+          
+          campaignLeads.forEach(lead => {
+            const hasMessage = leadsWithMessages.has(lead.id);
+            
+            leadsData[lead.id] = JSON.stringify({
+              id: lead.id,
+              name: lead.name,
+              title: lead.title,
+              company: lead.company,
+              url: lead.url,
+              status: lead.status,
+              hasMessage: hasMessage
+            });
+          });
+          
+          await redis.hset(`campaign:${campaignId}:leads`, leadsData);
+        }
+        
+        console.log(`✅ CACHE REFRESH: Successfully refreshed cache for campaign ${campaignId}: ${campaignLeads.length} leads cached`);
       }
     } catch (error) {
-      console.log(`⚠️ CACHE REFRESH: Error refreshing cache for campaign ${campaignId}: ${error.message}`);
+      console.log(`❌ CACHE REFRESH: Error refreshing cache for campaign ${campaignId}:`, error.message);
     }
 
     return NextResponse.json({
