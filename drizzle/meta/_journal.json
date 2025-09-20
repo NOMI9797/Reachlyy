@@ -15,6 +15,13 @@
       "when": 1758382906950,
       "tag": "0001_tricky_shape",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1758385552688,
+      "tag": "0002_brave_cargill",
+      "breakpoints": true
     }
   ]
 }

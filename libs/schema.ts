@@ -73,6 +73,27 @@ export const messages = pgTable('messages', {
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 
+// LinkedIn Accounts table - with user isolation
+export const linkedinAccounts = pgTable('linkedin_accounts', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
+  sessionId: text('session_id').notNull().unique(),
+  email: text('email').notNull(),
+  userName: text('user_name'),
+  profileImageUrl: text('profile_image_url'),
+  cookies: json('cookies').notNull(), // Store LinkedIn cookies as JSON
+  localStorage: json('local_storage'), // Store localStorage data as JSON
+  sessionStorage: json('session_storage'), // Store sessionStorage data as JSON
+  isActive: boolean('is_active').default(false).notNull(),
+  connectionInvites: integer('connection_invites').default(0),
+  followUpMessages: integer('follow_up_messages').default(0),
+  tags: json('tags').default([]), // Store tags as JSON array
+  salesNavActive: boolean('sales_nav_active').default(true),
+  lastUsed: timestamp('last_used').defaultNow().notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
 // Database initialization function
 export async function initializeDatabase() {
   const { migrate } = await import('drizzle-orm/postgres-js/migrator');

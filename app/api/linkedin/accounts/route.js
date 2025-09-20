@@ -6,7 +6,7 @@ const sessionManager = new LinkedInSessionManager();
 
 export const GET = withAuth(async (request, { user }) => {
   try {
-    const sessions = sessionManager.getAllSessions();
+    const sessions = await sessionManager.getAllSessions(user.id);
     
     // Transform sessions to account format
     const accounts = sessions.map(session => ({
@@ -15,11 +15,11 @@ export const GET = withAuth(async (request, { user }) => {
       name: session.userName || session.email, // Use actual name, fallback to email
       profileImageUrl: session.profileImageUrl || null,
       isActive: session.isActive || false,
-      connectionInvites: 0, // Default values
-      followUpMessages: 0,
+      connectionInvites: session.connectionInvites || 0,
+      followUpMessages: session.followUpMessages || 0,
       addedDate: new Date(session.createdAt).toLocaleDateString(),
-      tags: [],
-      salesNavActive: true,
+      tags: session.tags || [],
+      salesNavActive: session.salesNavActive || true,
       lastUsed: session.lastUsed
     }));
 
@@ -51,7 +51,7 @@ export const DELETE = withAuth(async (request, { user }) => {
       );
     }
 
-    const deleted = sessionManager.deleteSession(sessionId);
+    const deleted = await sessionManager.deleteSession(sessionId);
 
     if (deleted) {
       return NextResponse.json({

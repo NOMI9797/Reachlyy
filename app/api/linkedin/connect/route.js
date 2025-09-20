@@ -32,6 +32,34 @@ async function simulateHumanBehavior(page) {
 // Initialize session manager
 const sessionManager = new LinkedInSessionManager();
 
+// URL patterns for different LinkedIn pages
+const LINKEDIN_PATTERNS = {
+  SUCCESS: [
+    'linkedin.com/feed',
+    'linkedin.com/in/',
+    'linkedin.com/mynetwork/',
+    'linkedin.com/messaging/',
+    'linkedin.com/notifications/'
+  ],
+  INTERMEDIATE: [
+    'linkedin.com/checkpoint/',
+    'linkedin.com/challenge/',
+    'linkedin.com/uas/challenge/',
+    'linkedin.com/checkpoint/challenge/',
+    'linkedin.com/checkpoint/verify-',
+    'linkedin.com/checkpoint/challenge/'
+  ],
+  LOGIN: [
+    'linkedin.com/login',
+    'linkedin.com/uas/login'
+  ]
+};
+
+// Helper function to check if URL matches any pattern
+function urlMatchesPatterns(url, patterns) {
+  return patterns.some(pattern => url.includes(pattern));
+}
+
 // Browser-based LinkedIn connection
 async function connectLinkedInViaBrowser(sessionId) {
   console.log('🚀 Starting browser-based LinkedIn connection...');
@@ -58,20 +86,68 @@ async function connectLinkedInViaBrowser(sessionId) {
 
     console.log('👤 Waiting for user to complete LinkedIn login...');
     console.log('📝 Please log in to your LinkedIn account in the browser window...');
+    console.log('💡 Note: If LinkedIn asks for OTP/2FA verification, please complete it in the browser window.');
+    console.log('⏰ The system will wait up to 10 minutes for you to complete the login process.');
     
-    // Wait for user to complete login - check for successful navigation
+    // Wait for user to complete login with better handling of OTP and intermediate pages
     try {
-      await page.waitForFunction(() => {
-        const currentUrl = window.location.href;
-        return currentUrl.includes('linkedin.com/feed') || 
-               currentUrl.includes('linkedin.com/in/') ||
-               currentUrl.includes('linkedin.com/mynetwork/');
-      }, { timeout: 600000 }); // 10 minutes timeout for user to complete login
+      let loginCompleted = false;
+      let attempts = 0;
+      const maxAttempts = 120; // 10 minutes with 5-second intervals
       
-      console.log('✅ LinkedIn login successful!');
+      while (!loginCompleted && attempts < maxAttempts) {
+        // Double-check if login is already completed
+        if (loginCompleted) {
+          console.log('🛑 Login already completed, exiting loop...');
+          break;
+        }
+        
+        const currentUrl = await page.url();
+        console.log(`🔍 Checking login status... (${attempts + 1}/${maxAttempts}) - Current URL: ${currentUrl}`);
+        
+        // Check for successful login pages
+        const isSuccessPage = urlMatchesPatterns(currentUrl, LINKEDIN_PATTERNS.SUCCESS);
+        
+        // Check for intermediate pages that we should wait for (OTP, 2FA, etc.)
+        const isIntermediatePage = urlMatchesPatterns(currentUrl, LINKEDIN_PATTERNS.INTERMEDIATE);
+        
+        // Check if we're back on login page (user might have cancelled)
+        const isLoginPage = urlMatchesPatterns(currentUrl, LINKEDIN_PATTERNS.LOGIN);
+        
+        if (isSuccessPage) {
+          console.log('✅ LinkedIn login successful!');
+          loginCompleted = true;
+          console.log('🛑 Exiting login detection loop...');
+          break; // Exit the loop immediately
+        } else if (isIntermediatePage) {
+          console.log('⏳ User is on intermediate page (OTP/verification), waiting...');
+          console.log('📱 Please complete the verification process in the browser window.');
+          // Wait 5 seconds before checking again
+          await page.waitForTimeout(5000);
+        } else if (isLoginPage && attempts > 10) {
+          // If we're back on login page after some attempts, user might have cancelled
+          console.log('⚠️ User appears to have cancelled login (back on login page)');
+          throw new Error('USER_CANCELLED');
+        } else {
+          // Wait 5 seconds before checking again
+          await page.waitForTimeout(5000);
+        }
+        
+        attempts++;
+      }
+      
+      if (!loginCompleted) {
+        console.log('⚠️ Login timeout after 10 minutes');
+        throw new Error('USER_CANCELLED');
+      }
+      
+      console.log('🎉 Login process completed successfully!');
       
     } catch (error) {
-      console.log('⚠️ Login timeout or user cancelled');
+      if (error.message === 'USER_CANCELLED') {
+        throw error;
+      }
+      console.log('⚠️ Login error:', error.message);
       throw new Error('USER_CANCELLED');
     }
 
@@ -180,7 +256,16 @@ export const POST = withAuth(async (request, { user }) => {
       const sessionData = await connectLinkedInViaBrowser(sessionId);
 
       // Save session data with extracted profile info
-      const sessionFile = sessionManager.saveSession(sessionId, sessionData.userName, sessionData.cookies, sessionData.localStorage, sessionData.sessionStorage, sessionData.profileImageUrl, sessionData.userName);
+      const savedSession = await sessionManager.saveSession(
+        sessionId, 
+        sessionData.userName, // Using userName as email for now, you might want to extract actual email
+        sessionData.cookies, 
+        sessionData.localStorage, 
+        sessionData.sessionStorage, 
+        sessionData.profileImageUrl, 
+        sessionData.userName,
+        user.id // Pass user ID for database storage
+      );
       
       console.log('💾 Session data saved successfully');
 
@@ -188,7 +273,7 @@ export const POST = withAuth(async (request, { user }) => {
         success: true,
         message: 'LinkedIn account connected successfully',
         sessionId,
-        sessionFile: path.basename(sessionFile)
+        accountId: savedSession.id
       });
 
     } catch (error) {
