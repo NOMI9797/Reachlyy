@@ -12,7 +12,7 @@ export default function CampaignsPage() {
   const { data: session, status } = useSession();
   const router = useRouter();
   const [selectedCampaign, setSelectedCampaign] = useState(null);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
 
   // Redirect if not authenticated
   useEffect(() => {
@@ -67,7 +67,7 @@ export default function CampaignsPage() {
         sidebarCollapsed ? "ml-16" : "ml-64"
       } flex flex-col`}>
         {/* Top Bar */}
-        <TopBar />
+        <TopBar title="Campaigns" />
 
         {/* Content Area */}
         <div className="flex-1 overflow-hidden">

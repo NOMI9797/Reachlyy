@@ -11,7 +11,7 @@ import {
   Settings,
 } from "lucide-react";
 
-export default function TopBar() {
+export default function TopBar({ title = "Campaigns" }) {
   const { data: session } = useSession();
   const [theme, setTheme] = useState("light");
   const [showUserMenu, setShowUserMenu] = useState(false);
@@ -43,7 +43,7 @@ export default function TopBar() {
       {/* Left Section */}
       <div className="flex items-center gap-6">
         <div>
-          <h1 className="text-xl font-semibold text-base-content">Campaigns</h1>
+          <h1 className="text-xl font-semibold text-base-content">{title}</h1>
           <div className="flex items-center gap-4 mt-1">
             <div className="badge badge-success badge-sm">
               <div className="w-2 h-2 bg-success rounded-full mr-1"></div>
