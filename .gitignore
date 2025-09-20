@@ -25,6 +25,7 @@ yarn-debug.log*
 yarn-error.log*
 
 linkedin-browser-profiles
+linkedin-test-profiles
 
 # local env files
 .env*.local

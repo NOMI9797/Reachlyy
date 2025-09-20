@@ -3,8 +3,9 @@ import { db } from "@/libs/db";
 import { campaigns, leads, messages } from "@/libs/schema";
 import { eq, and, notExists } from "drizzle-orm";
 import getRedisClient from "@/libs/redis";
+import { withAuth } from "@/libs/auth-middleware";
 
-export async function POST(request) {
+export const POST = withAuth(async (request, { user }) => {
   try {
     const { userId } = await request.json();
     
@@ -140,4 +141,4 @@ export async function POST(request) {
       { status: 500 }
     );
   }
-}
+});

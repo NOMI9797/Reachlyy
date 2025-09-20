@@ -5,6 +5,7 @@ import { db } from "@/libs/db";
 import { leads, messages } from "@/libs/schema";
 import { eq, inArray } from "drizzle-orm";
 import getRedisClient from "@/libs/redis";
+import { withAuth } from "@/libs/auth-middleware";
 
 /**
  * POST /api/redis-workflow/workers/message-generator
@@ -18,7 +19,7 @@ import getRedisClient from "@/libs/redis";
  * 4. Performs bulk DB updates SECOND (persistence)
  * 5. Updates campaign metadata
  */
-export async function POST(request) {
+export const POST = withAuth(async (request, { user }) => {
   try {
     const streamManager = new RedisStreamManager();
     const redis = getRedisClient();
@@ -245,4 +246,4 @@ export async function POST(request) {
       { status: 500 }
     );
   }
-}
+});

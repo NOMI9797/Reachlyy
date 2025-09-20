@@ -2,9 +2,10 @@ import { NextResponse } from "next/server";
 import { db } from "@/libs/db";
 import { leads, posts, messages } from "@/libs/schema";
 import { eq, and } from "drizzle-orm";
+import { withAuth } from "@/libs/auth-middleware";
 
 // DELETE /api/leads/clear-failed - Remove all leads with error status
-export async function DELETE(request) {
+export const DELETE = withAuth(async (request, { user }) => {
   try {
     const { searchParams } = new URL(request.url);
     const campaignId = searchParams.get("campaignId");
@@ -25,7 +26,8 @@ export async function DELETE(request) {
         .where(
           and(
             eq(leads.campaignId, campaignId),
-            eq(leads.status, 'error')
+            eq(leads.status, 'error'),
+            eq(leads.userId, user.id)
           )
         );
 
@@ -55,7 +57,8 @@ export async function DELETE(request) {
         .where(
           and(
             eq(leads.campaignId, campaignId),
-            eq(leads.status, 'error')
+            eq(leads.status, 'error'),
+            eq(leads.userId, user.id)
           )
         );
 
@@ -83,4 +86,4 @@ export async function DELETE(request) {
       { status: 500 }
     );
   }
-}
+});

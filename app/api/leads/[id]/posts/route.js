@@ -1,29 +1,30 @@
 import { NextResponse } from "next/server";
 import { db } from "@/libs/db";
 import { leads, campaigns, posts } from "@/libs/schema";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, and } from "drizzle-orm";
+import { withAuth } from "@/libs/auth-middleware";
 
 // GET /api/leads/[id]/posts - Get posts for a lead (like Reachly)
-export async function GET(request, { params }) {
+export const GET = withAuth(async (request, { params, user }) => {
   try {
     const leadId = params.id;
 
-    // Check if lead exists
+    // Check if lead exists and belongs to user
     const [lead] = await db
       .select()
       .from(leads)
-      .where(eq(leads.id, leadId))
+      .where(and(eq(leads.id, leadId), eq(leads.userId, user.id)))
       .limit(1);
 
     if (!lead) {
       return NextResponse.json({ error: "Lead not found" }, { status: 404 });
     }
 
-    // Get posts for this lead
+    // Get posts for this lead (user already verified via lead ownership)
     const leadPosts = await db
       .select()
       .from(posts)
-      .where(eq(posts.leadId, leadId))
+      .where(and(eq(posts.leadId, leadId), eq(posts.userId, user.id)))
       .orderBy(desc(posts.timestamp));
 
     return NextResponse.json({
@@ -38,10 +39,10 @@ export async function GET(request, { params }) {
       { status: 500 }
     );
   }
-}
+});
 
 // POST /api/leads/[id]/posts - Save posts for a lead (like Reachly)
-export async function POST(request, { params }) {
+export const POST = withAuth(async (request, { params, user }) => {
   try {
     const leadId = params.id;
     const { posts: postsData } = await request.json();
@@ -50,11 +51,11 @@ export async function POST(request, { params }) {
       return NextResponse.json({ error: "Posts array is required" }, { status: 400 });
     }
 
-    // Check if lead exists
+    // Check if lead exists and belongs to user
     const [lead] = await db
       .select()
       .from(leads)
-      .where(eq(leads.id, leadId))
+      .where(and(eq(leads.id, leadId), eq(leads.userId, user.id)))
       .limit(1);
 
     if (!lead) {
@@ -72,8 +73,8 @@ export async function POST(request, { params }) {
       return 0;
     };
 
-    // Delete existing posts for this lead
-    await db.delete(posts).where(eq(posts.leadId, leadId));
+    // Delete existing posts for this lead (user already verified via lead ownership)
+    await db.delete(posts).where(and(eq(posts.leadId, leadId), eq(posts.userId, user.id)));
 
     // Prepare posts data
     const postsToInsert = postsData.map(post => {
@@ -83,6 +84,7 @@ export async function POST(request, { params }) {
       
       return {
         leadId: leadId,
+        userId: user.id,
         content: post.content || post.text || post.description || 'No content available',
         timestamp: new Date(post.timestamp || post.date || post.createdAt || new Date()),
         likes: likes,
@@ -111,4 +113,4 @@ export async function POST(request, { params }) {
       { status: 500 }
     );
   }
-}
+});

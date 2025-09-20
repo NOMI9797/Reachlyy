@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import Image from "next/image";
 import Sidebar from "@/components/layout/Sidebar";
 import TopBar from "@/components/layout/TopBar";
+import { useLinkedInAccounts } from "./hooks";
 import {
   Plus,
   MoreHorizontal,
@@ -19,58 +20,34 @@ import {
   MessageSquare,
   X,
   Shield,
+  TestTube2,
 } from "lucide-react";
-
-// Mock data for LinkedIn accounts
-const mockLinkedInAccounts = [
-  {
-    id: 1,
-    email: "husnain.ashfaq3939@gmail.com",
-    name: "Husnain Ashfaq",
-    avatar: "/api/placeholder/40/40",
-    status: "healthy",
-    subscription: "trial",
-    connectionInvites: 40,
-    followUpMessages: 30,
-    addedDate: "a day ago",
-    tags: [],
-    salesNavActive: true,
-  },
-  // Add more mock accounts as needed
-];
-
 
 export default function AccountsPage() {
   const { data: session, status } = useSession();
   const router = useRouter();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
-  const [accounts, setAccounts] = useState(mockLinkedInAccounts);
   const [selectedAccounts, setSelectedAccounts] = useState([]);
   const [currentPage, setCurrentPage] = useState(1);
   const accountsPerPage = 10;
   const [showLinkedInModal, setShowLinkedInModal] = useState(false);
-  const [isConnecting, setIsConnecting] = useState(false);
-  const [isLoadingAccounts, setIsLoadingAccounts] = useState(true);
+  const [toast, setToast] = useState({ show: false, message: '', type: 'success' });
 
-  // Fetch LinkedIn accounts
-  const fetchLinkedInAccounts = async () => {
-    try {
-      setIsLoadingAccounts(true);
-      const response = await fetch('/api/linkedin/accounts');
-      const data = await response.json();
-      
-      if (response.ok) {
-        setAccounts(data.accounts);
-      } else {
-        console.error('Error fetching accounts:', data.message);
-        // Keep mock data as fallback
-      }
-    } catch (error) {
-      console.error('Error fetching LinkedIn accounts:', error);
-      // Keep mock data as fallback
-    } finally {
-      setIsLoadingAccounts(false);
-    }
+  // Use React Query hooks for LinkedIn accounts
+  const {
+    accounts,
+    loading: isLoadingAccounts,
+    connectAccount,
+    toggleAccountStatus,
+    testAccountSession,
+    isConnecting,
+    isTesting,
+  } = useLinkedInAccounts();
+
+  // Helper function to show toast
+  const showToast = (message, type = 'success', duration = 5000) => {
+    setToast({ show: true, message, type });
+    setTimeout(() => setToast({ show: false, message: '', type: 'success' }), duration);
   };
 
   // Redirect if not authenticated
@@ -78,17 +55,12 @@ export default function AccountsPage() {
     if (status === "loading") return;
     if (!session) {
       router.push("/");
-    } else {
-      // Fetch accounts when user is authenticated
-      fetchLinkedInAccounts();
     }
   }, [session, status, router]);
 
-  const filteredAccounts = accounts;
-
-  const totalPages = Math.ceil(filteredAccounts.length / accountsPerPage);
+  const totalPages = Math.ceil(accounts.length / accountsPerPage);
   const startIndex = (currentPage - 1) * accountsPerPage;
-  const paginatedAccounts = filteredAccounts.slice(startIndex, startIndex + accountsPerPage);
+  const paginatedAccounts = accounts.slice(startIndex, startIndex + accountsPerPage);
 
   const handleSelectAccount = (accountId) => {
     setSelectedAccounts(prev => 
@@ -107,83 +79,53 @@ export default function AccountsPage() {
   };
 
   const handleLinkedInConnect = async () => {
-    setIsConnecting(true);
-    
     try {
-      const response = await fetch('/api/linkedin/connect', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        }
-      });
-
-      const data = await response.json();
-
-      if (response.ok) {
-        // Success - show success message
-        console.log('LinkedIn account connected successfully:', data);
-        
-        // Close modal
-        setShowLinkedInModal(false);
-        
-        // Refresh the accounts list
-        await fetchLinkedInAccounts();
-        
-        // Show success message
-        alert('LinkedIn account connected successfully!');
-        
-      } else {
-        // Handle different error types
-        if (data.error === 'USER_CANCELLED') {
-          alert('LinkedIn login was cancelled. Please try again.');
-        } else if (data.error === 'LOGIN_FAILED') {
-          alert('LinkedIn login failed. Please try again.');
-        } else {
-          alert(`Error: ${data.message || 'Failed to connect LinkedIn account'}`);
-        }
-      }
+      await connectAccount();
+      
+      // Success - close modal
+      setShowLinkedInModal(false);
+      
+      // Show success message
+      showToast('LinkedIn account connected successfully!', 'success', 3000);
       
     } catch (error) {
-      console.error('Error connecting LinkedIn account:', error);
-      alert('Network error. Please try again.');
-    } finally {
-      setIsConnecting(false);
+      // Handle different error types
+      let errorMessage = 'Failed to connect LinkedIn account';
+      if (error.message.includes('USER_CANCELLED')) {
+        errorMessage = 'LinkedIn login was cancelled. Please try again.';
+      } else if (error.message.includes('LOGIN_FAILED')) {
+        errorMessage = 'LinkedIn login failed. Please try again.';
+      } else {
+        errorMessage = error.message || errorMessage;
+      }
+      
+      showToast(errorMessage, 'error');
     }
   };
 
   const handleCloseModal = () => {
     setShowLinkedInModal(false);
-    setIsConnecting(false);
   };
 
   const handleToggleActive = async (accountId, isActive) => {
     try {
-      const response = await fetch('/api/linkedin/accounts/toggle-active', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          accountId,
-          isActive
-        })
-      });
+      await toggleAccountStatus(accountId, isActive);
+    } catch (error) {
+      showToast(`Error: ${error.message || 'Failed to update account status'}`, 'error');
+    }
+  };
 
-      if (response.ok) {
-        // Update local state
-        setAccounts(prevAccounts => 
-          prevAccounts.map(account => ({
-            ...account,
-            isActive: account.id === accountId ? isActive : false
-          }))
-        );
+  const handleTestSession = async (accountId) => {
+    try {
+      const result = await testAccountSession(accountId);
+      
+      if (result.isValid) {
+        showToast('✅ Session is valid and working!', 'success', 3000);
       } else {
-        const data = await response.json();
-        alert(`Error: ${data.message || 'Failed to update account status'}`);
+        showToast(`❌ Session is invalid: ${result.reason}`, 'error', 5000);
       }
     } catch (error) {
-      console.error('Error toggling account status:', error);
-      alert('Network error. Please try again.');
+      showToast(`Error testing session: ${error.message}`, 'error');
     }
   };
 
@@ -246,7 +188,7 @@ export default function AccountsPage() {
           <div className="flex items-center justify-end mb-4">
             <div className="flex items-center gap-2">
               <span className="text-sm text-base-content/60">
-                {startIndex + 1} / {Math.min(startIndex + accountsPerPage, filteredAccounts.length)} of {filteredAccounts.length}
+                {startIndex + 1} / {Math.min(startIndex + accountsPerPage, accounts.length)} of {accounts.length}
               </span>
               
               <div className="flex items-center gap-1">
@@ -374,16 +316,13 @@ export default function AccountsPage() {
 
                        {/* Active Status */}
                        <div className="col-span-2">
-                      
-                           <input
-                             type="checkbox"
-                             className="toggle toggle-primary toggle-lg"
-                             checked={account.isActive || false}
-                             onChange={(e) => handleToggleActive(account.id, e.target.checked)}
-                             disabled={isLoadingAccounts}
-                           />
-                         
-                   
+                         <input
+                           type="checkbox"
+                           className="toggle toggle-primary toggle-lg"
+                           checked={account.isActive || false}
+                           onChange={(e) => handleToggleActive(account.id, e.target.checked)}
+                           disabled={isLoadingAccounts}
+                         />
                        </div>
 
                       {/* Daily Limits */}
@@ -413,6 +352,21 @@ export default function AccountsPage() {
                           <button className="btn btn-ghost btn-sm btn-circle" title="Edit">
                             <Edit className="h-4 w-4" />
                           </button>
+                          {/* Test Session Button - Only show for active accounts */}
+                          {account.isActive && (
+                            <button 
+                              className="btn btn-ghost btn-sm btn-circle" 
+                              title="Test Session Validity"
+                              onClick={() => handleTestSession(account.id)}
+                              disabled={isTesting}
+                            >
+                              {isTesting ? (
+                                <div className="loading loading-spinner loading-xs"></div>
+                              ) : (
+                                <TestTube2 className="h-4 w-4" />
+                              )}
+                            </button>
+                          )}
                            <div className="dropdown dropdown-end">
                              <button className="btn btn-ghost btn-sm btn-circle" title="More actions">
                                <MoreHorizontal className="h-4 w-4" />
@@ -434,7 +388,7 @@ export default function AccountsPage() {
             </div>
 
             {/* Empty State */}
-            {filteredAccounts.length === 0 && (
+            {accounts.length === 0 && (
               <div className="py-12 text-center">
                 <div className="w-16 h-16 bg-base-200 rounded-full flex items-center justify-center mx-auto mb-4">
                   <Users className="h-8 w-8 text-base-content/40" />
@@ -455,10 +409,10 @@ export default function AccountsPage() {
           </div>
 
           {/* Pagination Footer */}
-          {filteredAccounts.length > 0 && (
+          {accounts.length > 0 && (
             <div className="flex items-center justify-between mt-6">
               <div className="text-sm text-base-content/60">
-                Showing {startIndex + 1} to {Math.min(startIndex + accountsPerPage, filteredAccounts.length)} of {filteredAccounts.length} results
+                Showing {startIndex + 1} to {Math.min(startIndex + accountsPerPage, accounts.length)} of {accounts.length} results
               </div>
               
               <div className="flex items-center gap-2">
@@ -602,6 +556,25 @@ export default function AccountsPage() {
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Toast Notification */}
+      {toast.show && (
+        <div className="fixed top-4 right-4 z-50">
+          <div className={`alert ${
+            toast.type === 'error' ? 'alert-error' : 'alert-success'
+          } shadow-lg`}>
+            <div>
+              <span>{toast.message}</span>
+            </div>
+            <button 
+              className="btn btn-sm btn-circle btn-ghost"
+              onClick={() => setToast({ show: false, message: '', type: 'success' })}
+            >
+              <X className="h-4 w-4" />
+            </button>
           </div>
         </div>
       )}

@@ -3,9 +3,10 @@ import { db } from "@/libs/db";
 import { leads, campaigns, posts, messages } from "@/libs/schema";
 import { eq, and, isNull, desc, count } from "drizzle-orm";
 import { generatePersonalizedMessage } from "@/libs/groq-service";
+import { withAuth } from "@/libs/auth-middleware";
 
 // POST /api/messages/generate-bulk - Generate messages for all completed leads
-export async function POST(request) {
+export const POST = withAuth(async (request, { user }) => {
   try {
     const { campaignId, leadIds, model, customPrompt } = await request.json();
 
@@ -20,7 +21,7 @@ export async function POST(request) {
     const [campaign] = await db
       .select()
       .from(campaigns)
-      .where(eq(campaigns.id, campaignId))
+      .where(and(eq(campaigns.id, campaignId), eq(campaigns.userId, user.id)))
       .limit(1);
 
     if (!campaign) {
@@ -209,7 +210,7 @@ export async function POST(request) {
       { status: 500 }
     );
   }
-}
+});
 
 // GET /api/messages/generate-bulk - Get bulk generation status/statistics
 export async function GET(request) {

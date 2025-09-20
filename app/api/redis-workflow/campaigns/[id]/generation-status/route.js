@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import getRedisClient from "@/libs/redis";
+import { withAuth } from "@/libs/auth-middleware";
 
 /**
  * GET /api/redis-workflow/campaigns/[id]/generation-status
@@ -15,7 +16,7 @@ import getRedisClient from "@/libs/redis";
  * @param {string} id - Campaign ID
  * @returns {object} Real-time generation status
  */
-export async function GET(request, { params }) {
+export const GET = withAuth(async (request, { params, user }) => {
   try {
     const { id: campaignId } = params;
 
@@ -169,4 +170,4 @@ export async function GET(request, { params }) {
       { status: 500 }
     );
   }
-}
+});

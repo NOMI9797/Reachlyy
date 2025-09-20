@@ -3,8 +3,9 @@ import getRedisClient from "@/libs/redis";
 import { db } from "@/libs/db";
 import { messages } from "@/libs/schema";
 import { eq } from "drizzle-orm";
+import { withAuth } from "@/libs/auth-middleware";
 
-export async function GET(request, { params }) {
+export const GET = withAuth(async (request, { params, user }) => {
   try {
     const { id: campaignId } = params;
     
@@ -82,4 +83,4 @@ export async function GET(request, { params }) {
       { status: 500 }
     );
   }
-}
+});

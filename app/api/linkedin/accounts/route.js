@@ -1,11 +1,12 @@
 import { NextResponse } from 'next/server';
 import LinkedInSessionManager from '@/libs/linkedin-session';
+import { withAuth } from "@/libs/auth-middleware";
 
 const sessionManager = new LinkedInSessionManager();
 
-export async function GET() {
+export const GET = withAuth(async (request, { user }) => {
   try {
-    const sessions = sessionManager.getAllSessions();
+    const sessions = await sessionManager.getAllSessions(user.id);
     
     // Transform sessions to account format
     const accounts = sessions.map(session => ({
@@ -14,11 +15,11 @@ export async function GET() {
       name: session.userName || session.email, // Use actual name, fallback to email
       profileImageUrl: session.profileImageUrl || null,
       isActive: session.isActive || false,
-      connectionInvites: 0, // Default values
-      followUpMessages: 0,
+      connectionInvites: session.connectionInvites || 0,
+      followUpMessages: session.followUpMessages || 0,
       addedDate: new Date(session.createdAt).toLocaleDateString(),
-      tags: [],
-      salesNavActive: true,
+      tags: session.tags || [],
+      salesNavActive: session.salesNavActive || true,
       lastUsed: session.lastUsed
     }));
 
@@ -37,9 +38,9 @@ export async function GET() {
       { status: 500 }
     );
   }
-}
+});
 
-export async function DELETE(request) {
+export const DELETE = withAuth(async (request, { user }) => {
   try {
     const { sessionId } = await request.json();
 
@@ -50,7 +51,7 @@ export async function DELETE(request) {
       );
     }
 
-    const deleted = sessionManager.deleteSession(sessionId);
+    const deleted = await sessionManager.deleteSession(sessionId);
 
     if (deleted) {
       return NextResponse.json({
@@ -74,4 +75,4 @@ export async function DELETE(request) {
       { status: 500 }
     );
   }
-}
+});

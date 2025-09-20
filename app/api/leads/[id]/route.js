@@ -1,17 +1,18 @@
 import { NextResponse } from "next/server";
 import { db } from "@/libs/db";
 import { leads, campaigns } from "@/libs/schema";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
+import { withAuth } from "@/libs/auth-middleware";
 
-// GET /api/leads/[id] - Get a specific lead (like Reachly)
-export async function GET(request, { params }) {
+// GET /api/leads/[id] - Get a specific lead (authenticated user)
+export const GET = withAuth(async (request, { params, user }) => {
   try {
     const leadId = params.id;
 
     const [lead] = await db
       .select()
       .from(leads)
-      .where(eq(leads.id, leadId))
+      .where(and(eq(leads.id, leadId), eq(leads.userId, user.id)))
       .limit(1);
 
     if (!lead) {
@@ -30,33 +31,33 @@ export async function GET(request, { params }) {
       { status: 500 }
     );
   }
-}
+});
 
-// PUT /api/leads/[id] - Update a lead (like Reachly)
-export async function PUT(request, { params }) {
+// PUT /api/leads/[id] - Update a lead (authenticated user)
+export const PUT = withAuth(async (request, { params, user }) => {
   try {
     const leadId = params.id;
     const updateData = await request.json();
 
-    // Check if lead exists
+    // Check if lead exists and belongs to user
     const [existingLead] = await db
       .select()
       .from(leads)
-      .where(eq(leads.id, leadId))
+      .where(and(eq(leads.id, leadId), eq(leads.userId, user.id)))
       .limit(1);
 
     if (!existingLead) {
       return NextResponse.json({ error: "Lead not found" }, { status: 404 });
     }
 
-    // Update the lead
+    // Update the lead (ensure user owns it)
     const [updatedLead] = await db
       .update(leads)
       .set({
         ...updateData,
         updatedAt: new Date(),
       })
-      .where(eq(leads.id, leadId))
+      .where(and(eq(leads.id, leadId), eq(leads.userId, user.id)))
       .returning();
 
     return NextResponse.json({
@@ -71,26 +72,26 @@ export async function PUT(request, { params }) {
       { status: 500 }
     );
   }
-}
+});
 
-// DELETE /api/leads/[id] - Delete a lead (like Reachly)
-export async function DELETE(request, { params }) {
+// DELETE /api/leads/[id] - Delete a lead (authenticated user)
+export const DELETE = withAuth(async (request, { params, user }) => {
   try {
     const leadId = params.id;
 
-    // Check if lead exists
+    // Check if lead exists and belongs to user
     const [existingLead] = await db
       .select()
       .from(leads)
-      .where(eq(leads.id, leadId))
+      .where(and(eq(leads.id, leadId), eq(leads.userId, user.id)))
       .limit(1);
 
     if (!existingLead) {
       return NextResponse.json({ error: "Lead not found" }, { status: 404 });
     }
 
-    // Delete the lead (posts and messages will be cascaded)
-    await db.delete(leads).where(eq(leads.id, leadId));
+    // Delete the lead (posts and messages will be cascaded, ensure user owns it)
+    await db.delete(leads).where(and(eq(leads.id, leadId), eq(leads.userId, user.id)));
 
     return NextResponse.json({
       success: true,
@@ -104,4 +105,4 @@ export async function DELETE(request, { params }) {
       { status: 500 }
     );
   }
-}
+});

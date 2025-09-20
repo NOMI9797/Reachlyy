@@ -3,6 +3,7 @@ import getRedisClient from "@/libs/redis";
 import { db } from "@/libs/db";
 import { campaigns, leads, messages } from "@/libs/schema";
 import { eq } from "drizzle-orm";
+import { withAuth } from "@/libs/auth-middleware";
 
 /**
  * POST /api/redis-workflow/campaigns/[id]/refresh-cache
@@ -10,7 +11,7 @@ import { eq } from "drizzle-orm";
  * Refreshes Redis cache for a specific campaign by fetching fresh data from DB
  * This ensures Redis has the latest campaign and leads data
  */
-export async function POST(request, { params }) {
+export const POST = withAuth(async (request, { params, user }) => {
   try {
     const { id: campaignId } = params;
     
@@ -142,4 +143,4 @@ export async function POST(request, { params }) {
       { status: 500 }
     );
   }
-}
+});

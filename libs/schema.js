@@ -1,9 +1,23 @@
 import { pgTable, text, timestamp, integer, boolean, json, uuid, varchar } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 
-// Campaigns table - EXACTLY like Reachly
+// Users table - for authentication and user isolation
+export const users = pgTable('users', {
+  id: text('id').primaryKey(), // Use text for OAuth IDs like Google
+  email: text('email').notNull().unique(),
+  name: text('name'),
+  image: text('image'),
+  googleId: text('google_id').unique(),
+  stripeCustomerId: text('stripe_customer_id'),
+  subscriptionStatus: varchar('subscription_status', { length: 20 }).default('free'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// Campaigns table - with user isolation
 export const campaigns = pgTable('campaigns', {
   id: uuid('id').primaryKey().defaultRandom(),
+  userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
   name: text('name').notNull(),
   description: text('description'),
   status: varchar('status', { length: 20 }).notNull().default('draft'),
@@ -11,9 +25,10 @@ export const campaigns = pgTable('campaigns', {
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 
-// Leads table - EXACTLY like Reachly
+// Leads table - with user isolation
 export const leads = pgTable('leads', {
   id: uuid('id').primaryKey().defaultRandom(),
+  userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
   campaignId: uuid('campaign_id').references(() => campaigns.id, { onDelete: 'cascade' }).notNull(),
   url: text('url').notNull(),
   name: text('name'),
@@ -27,9 +42,10 @@ export const leads = pgTable('leads', {
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 
-// Posts table - EXACTLY like Reachly
+// Posts table - with user isolation
 export const posts = pgTable('posts', {
   id: uuid('id').primaryKey().defaultRandom(),
+  userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
   leadId: uuid('lead_id').references(() => leads.id, { onDelete: 'cascade' }).notNull(),
   content: text('content').notNull(),
   timestamp: timestamp('timestamp').notNull(),
@@ -41,9 +57,10 @@ export const posts = pgTable('posts', {
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 
-// Messages table - EXACTLY like Reachly
+// Messages table - with user isolation
 export const messages = pgTable('messages', {
   id: uuid('id').primaryKey().defaultRandom(),
+  userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
   leadId: uuid('lead_id').references(() => leads.id, { onDelete: 'cascade' }).notNull(),
   campaignId: uuid('campaign_id').references(() => campaigns.id, { onDelete: 'cascade' }).notNull(),
   content: text('content').notNull(),
@@ -52,6 +69,27 @@ export const messages = pgTable('messages', {
   postsAnalyzed: integer('posts_analyzed').default(3),
   status: varchar('status', { length: 20 }).notNull().default('draft'), // draft, sent, scheduled
   sentAt: timestamp('sent_at'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// LinkedIn Accounts table - with user isolation
+export const linkedinAccounts = pgTable('linkedin_accounts', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
+  sessionId: text('session_id').notNull().unique(),
+  email: text('email').notNull(),
+  userName: text('user_name'),
+  profileImageUrl: text('profile_image_url'),
+  cookies: json('cookies').notNull(), // Store LinkedIn cookies as JSON
+  localStorage: json('local_storage'), // Store localStorage data as JSON
+  sessionStorage: json('session_storage'), // Store sessionStorage data as JSON
+  isActive: boolean('is_active').default(false).notNull(),
+  connectionInvites: integer('connection_invites').default(0),
+  followUpMessages: integer('follow_up_messages').default(0),
+  tags: json('tags').default([]), // Store tags as JSON array
+  salesNavActive: boolean('sales_nav_active').default(true),
+  lastUsed: timestamp('last_used').defaultNow().notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });

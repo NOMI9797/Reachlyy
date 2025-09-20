@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import getRedisClient, { RedisStreamManager } from "@/libs/redis";
+import { withAuth } from "@/libs/auth-middleware";
 
 /**
  * POST /api/redis-workflow/campaigns/[id]/auto-queue
@@ -7,7 +8,7 @@ import getRedisClient, { RedisStreamManager } from "@/libs/redis";
  * Reads campaign leads from Redis, filters ones without messages,
  * and enqueues them into the Redis stream for message generation.
  */
-export async function POST(request, { params }) {
+export const POST = withAuth(async (request, { params, user }) => {
   try {
     const { id: campaignId } = params;
     const { model = "llama-3.1-8b-instant", customPrompt = "" } = await request.json().catch(() => ({}));
@@ -92,6 +93,6 @@ export async function POST(request, { params }) {
       { status: 500 }
     );
   }
-}
+});
 
 

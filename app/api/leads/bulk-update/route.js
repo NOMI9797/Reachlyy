@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
 import { db } from "@/libs/db";
 import { leads, posts } from "@/libs/schema";
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, and } from "drizzle-orm";
+import { withAuth } from "@/libs/auth-middleware";
 
-// POST /api/leads/bulk-update - Bulk update leads and their posts (optimized)
-export async function POST(request) {
+// POST /api/leads/bulk-update - Bulk update leads and their posts (authenticated user)
+export const POST = withAuth(async (request, { user }) => {
   try {
     const { leadsData } = await request.json();
 
@@ -35,6 +36,20 @@ export async function POST(request) {
     // Use database transaction for atomicity
     const result = await db.transaction(async (tx) => {
       const leadIds = leadsData.map(lead => lead.leadId);
+      
+      // Verify all leads belong to the authenticated user
+      const userLeads = await tx
+        .select({ id: leads.id })
+        .from(leads)
+        .where(and(inArray(leads.id, leadIds), eq(leads.userId, user.id)));
+      
+      const userLeadIds = new Set(userLeads.map(lead => lead.id));
+      const unauthorizedLeads = leadIds.filter(id => !userLeadIds.has(id));
+      
+      if (unauthorizedLeads.length > 0) {
+        throw new Error(`Unauthorized access to leads: ${unauthorizedLeads.join(', ')}`);
+      }
+      
       const allPostsToInsert = [];
       const leadsToUpdate = [];
 
@@ -65,6 +80,7 @@ export async function POST(request) {
             const shares = safeNumber(post.numShares || post.reposts || post.repostCount || post.shares);
             
             return {
+              userId: user.id,
               leadId: leadId,
               content: post.content || post.text || post.description || 'No content available',
               timestamp: new Date(post.timestamp || post.date || post.createdAt || new Date()),
@@ -79,9 +95,9 @@ export async function POST(request) {
         }
       }
 
-      // Step 1: Delete existing posts for all leads (batch operation)
+      // Step 1: Delete existing posts for all leads (batch operation, user-scoped)
       if (allPostsToInsert.length > 0) {
-        await tx.delete(posts).where(inArray(posts.leadId, leadIds));
+        await tx.delete(posts).where(and(inArray(posts.leadId, leadIds), eq(posts.userId, user.id)));
       }
 
       // Step 2: Insert all new posts (batch operation)
@@ -96,7 +112,7 @@ export async function POST(request) {
         const [updatedLead] = await tx
           .update(leads)
           .set(updateData)
-          .where(eq(leads.id, leadId))
+          .where(and(eq(leads.id, leadId), eq(leads.userId, user.id)))
           .returning();
         updatedLeads.push(updatedLead);
       }
@@ -149,4 +165,4 @@ export async function POST(request) {
       { status: 500 }
     );
   }
-}
+});

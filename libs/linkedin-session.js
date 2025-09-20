@@ -1,23 +1,21 @@
-import fs from 'fs';
-import path from 'path';
-
-const SESSIONS_DIR = path.join(process.cwd(), 'linkedin-sessions');
+import { db } from './db';
+import { linkedinAccounts } from './schema';
+import { eq, and, desc, inArray, ne } from 'drizzle-orm';
 
 export class LinkedInSessionManager {
   constructor() {
-    this.ensureSessionsDir();
-  }
-
-  ensureSessionsDir() {
-    if (!fs.existsSync(SESSIONS_DIR)) {
-      fs.mkdirSync(SESSIONS_DIR, { recursive: true });
-    }
+    // No need for file system operations anymore
   }
 
   // Save session data
-  saveSession(sessionId, email, cookies, localStorage, sessionStorage, profileImageUrl = null, userName = null) {
+  async saveSession(sessionId, email, cookies, localStorage, sessionStorage, profileImageUrl = null, userName = null, userId = null) {
+    if (!userId) {
+      throw new Error('User ID is required for database storage');
+    }
+
     const sessionData = {
       sessionId,
+      userId,
       email,
       userName,
       cookies,
@@ -25,121 +23,203 @@ export class LinkedInSessionManager {
       sessionStorage,
       profileImageUrl,
       isActive: false, // Default to inactive
-      createdAt: new Date().toISOString(),
-      lastUsed: new Date().toISOString()
     };
 
-    const sessionFile = path.join(SESSIONS_DIR, `${sessionId}.json`);
-    fs.writeFileSync(sessionFile, JSON.stringify(sessionData, null, 2));
-    
-    return sessionFile;
+    try {
+      const result = await db.insert(linkedinAccounts).values(sessionData).returning();
+      return result[0];
+    } catch (error) {
+      console.error('Error saving session to database:', error);
+      throw error;
+    }
   }
 
   // Load session data
-  loadSession(sessionId) {
-    const sessionFile = path.join(SESSIONS_DIR, `${sessionId}.json`);
-    
-    if (!fs.existsSync(sessionFile)) {
-      return null;
-    }
-
+  async loadSession(sessionId) {
     try {
-      const sessionData = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+      const result = await db
+        .select()
+        .from(linkedinAccounts)
+        .where(eq(linkedinAccounts.sessionId, sessionId))
+        .limit(1);
+
+      if (result.length === 0) {
+        return null;
+      }
+
+      const session = result[0];
       
       // Update last used timestamp
-      sessionData.lastUsed = new Date().toISOString();
-      fs.writeFileSync(sessionFile, JSON.stringify(sessionData, null, 2));
+      await db
+        .update(linkedinAccounts)
+        .set({ lastUsed: new Date() })
+        .where(eq(linkedinAccounts.sessionId, sessionId));
       
-      return sessionData;
+      return session;
     } catch (error) {
-      console.error('Error loading session:', error);
+      console.error('Error loading session from database:', error);
       return null;
     }
   }
 
-  // Get all sessions
-  getAllSessions() {
-    if (!fs.existsSync(SESSIONS_DIR)) {
+  // Get all sessions for a user
+  async getAllSessions(userId = null) {
+    try {
+      let query = db.select().from(linkedinAccounts);
+      
+      if (userId) {
+        query = query.where(eq(linkedinAccounts.userId, userId));
+      }
+      
+      const sessions = await query.orderBy(desc(linkedinAccounts.lastUsed));
+      return sessions;
+    } catch (error) {
+      console.error('Error getting all sessions from database:', error);
       return [];
     }
-
-    const files = fs.readdirSync(SESSIONS_DIR);
-    const sessions = [];
-
-    for (const file of files) {
-      if (file.endsWith('.json')) {
-        const sessionId = file.replace('.json', '');
-        const session = this.loadSession(sessionId);
-        if (session) {
-          sessions.push(session);
-        }
-      }
-    }
-
-    return sessions.sort((a, b) => new Date(b.lastUsed) - new Date(a.lastUsed));
   }
 
   // Delete session
-  deleteSession(sessionId) {
-    const sessionFile = path.join(SESSIONS_DIR, `${sessionId}.json`);
-    
-    if (fs.existsSync(sessionFile)) {
-      fs.unlinkSync(sessionFile);
-      return true;
+  async deleteSession(sessionId) {
+    try {
+      const result = await db
+        .delete(linkedinAccounts)
+        .where(eq(linkedinAccounts.sessionId, sessionId))
+        .returning();
+      
+      return result.length > 0;
+    } catch (error) {
+      console.error('Error deleting session from database:', error);
+      return false;
     }
-    
-    return false;
   }
 
   // Clean up old sessions (older than 30 days)
-  cleanupOldSessions() {
-    const sessions = this.getAllSessions();
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+  async cleanupOldSessions() {
+    try {
+      const thirtyDaysAgo = new Date();
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
-    let cleanedCount = 0;
-    
-    for (const session of sessions) {
-      if (new Date(session.lastUsed) < thirtyDaysAgo) {
-        if (this.deleteSession(session.sessionId)) {
-          cleanedCount++;
-        }
-      }
+      const result = await db
+        .delete(linkedinAccounts)
+        .where(eq(linkedinAccounts.lastUsed, thirtyDaysAgo))
+        .returning();
+      
+      return result.length;
+    } catch (error) {
+      console.error('Error cleaning up old sessions:', error);
+      return 0;
     }
-
-    return cleanedCount;
   }
 
   // Get session by email
-  getSessionByEmail(email) {
-    const sessions = this.getAllSessions();
-    return sessions.find(session => session.email === email);
+  async getSessionByEmail(email, userId = null) {
+    try {
+      let query = db
+        .select()
+        .from(linkedinAccounts)
+        .where(eq(linkedinAccounts.email, email));
+      
+      if (userId) {
+        query = query.where(and(
+          eq(linkedinAccounts.email, email),
+          eq(linkedinAccounts.userId, userId)
+        ));
+      }
+      
+      const result = await query.limit(1);
+      return result.length > 0 ? result[0] : null;
+    } catch (error) {
+      console.error('Error getting session by email:', error);
+      return null;
+    }
   }
 
   // Check if session exists and is valid
-  isSessionValid(sessionId) {
-    const session = this.loadSession(sessionId);
+  async isSessionValid(sessionId) {
+    const session = await this.loadSession(sessionId);
     return session !== null;
   }
 
   // Update session status (like isActive)
-  updateSessionStatus(sessionId, updates) {
-    const session = this.loadSession(sessionId);
-    if (!session) {
+  async updateSessionStatus(sessionId, updates) {
+    try {
+      const result = await db
+        .update(linkedinAccounts)
+        .set({
+          ...updates,
+          lastUsed: new Date()
+        })
+        .where(eq(linkedinAccounts.sessionId, sessionId))
+        .returning();
+      
+      return result.length > 0;
+    } catch (error) {
+      console.error('Error updating session status:', error);
       return false;
     }
+  }
 
-    // Update the session data
-    const updatedSession = {
-      ...session,
-      ...updates,
-      lastUsed: new Date().toISOString()
-    };
+  // Optimized: Toggle account status with single transaction
+  async toggleAccountStatus(userId, accountId, isActive) {
+    try {
+      // Use a transaction to ensure atomicity
+      return await db.transaction(async (tx) => {
+        if (isActive) {
+          // First, deactivate all other accounts for this user
+          await tx
+            .update(linkedinAccounts)
+            .set({
+              isActive: false,
+              lastUsed: new Date()
+            })
+            .where(and(
+              eq(linkedinAccounts.userId, userId),
+              ne(linkedinAccounts.sessionId, accountId)
+            ));
+        }
 
-    const sessionFile = path.join(SESSIONS_DIR, `${sessionId}.json`);
-    fs.writeFileSync(sessionFile, JSON.stringify(updatedSession, null, 2));
-    
-    return true;
+        // Then activate/deactivate the target account
+        const result = await tx
+          .update(linkedinAccounts)
+          .set({
+            isActive,
+            lastUsed: new Date()
+          })
+          .where(and(
+            eq(linkedinAccounts.sessionId, accountId),
+            eq(linkedinAccounts.userId, userId)
+          ))
+          .returning();
+
+        return result.length > 0;
+      });
+    } catch (error) {
+      console.error('Error toggling account status:', error);
+      return false;
+    }
+  }
+
+  // Batch update session status for multiple sessions
+  async batchUpdateSessionStatus(userId, sessionIds, updates) {
+    try {
+      const result = await db
+        .update(linkedinAccounts)
+        .set({
+          ...updates,
+          lastUsed: new Date()
+        })
+        .where(and(
+          eq(linkedinAccounts.userId, userId),
+          inArray(linkedinAccounts.sessionId, sessionIds)
+        ))
+        .returning();
+      
+      return result.length;
+    } catch (error) {
+      console.error('Error batch updating session status:', error);
+      return 0;
+    }
   }
 }
 

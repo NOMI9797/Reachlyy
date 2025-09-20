@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server';
 import LinkedInSessionManager from '@/libs/linkedin-session';
+import { withAuth } from "@/libs/auth-middleware";
 
 const sessionManager = new LinkedInSessionManager();
 
-export async function POST(request) {
+export const POST = withAuth(async (request, { user }) => {
   try {
     const { accountId, isActive } = await request.json();
 
@@ -14,30 +15,15 @@ export async function POST(request) {
       );
     }
 
-    // Get all sessions
-    const sessions = sessionManager.getAllSessions();
-    
-    // Find the target session
-    const targetSession = sessions.find(session => session.sessionId === accountId);
-    
-    if (!targetSession) {
+    // Use optimized single-transaction method
+    const updated = await sessionManager.toggleAccountStatus(user.id, accountId, isActive);
+
+    if (!updated) {
       return NextResponse.json(
-        { error: 'Account not found' },
+        { error: 'Account not found or failed to update' },
         { status: 404 }
       );
     }
-
-    if (isActive) {
-      // If activating this account, deactivate all others first
-      for (const session of sessions) {
-        if (session.sessionId !== accountId) {
-          sessionManager.updateSessionStatus(session.sessionId, { isActive: false });
-        }
-      }
-    }
-
-    // Update the target session's active status
-    sessionManager.updateSessionStatus(accountId, { isActive });
 
     return NextResponse.json({
       success: true,
@@ -53,4 +39,4 @@ export async function POST(request) {
       { status: 500 }
     );
   }
-}
+});
