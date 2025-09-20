@@ -166,7 +166,7 @@ export function useRedisWorkflow() {
         const queueLength = redis?.queueLength || 0;
         const hasPendingLeads = leads?.pending > 0;
         const hasCompletedLeads = leads?.completed > 0;
-        const isProcessing = isProcessingMessages || isQueueing;
+        const isCurrentlyProcessing = isProcessing;
         
         // Active state: Poll every 2s when there's work
         if (queueLength > 0 || isProcessing || hasPendingLeads) {
@@ -191,16 +191,11 @@ export function useRedisWorkflow() {
 
   // Queue all pending leads for a campaign
   const queueAllPendingLeads = useCallback(async (campaignId, options = {}) => {
-    try {
-      const result = await queueLeadsMutation.mutateAsync({
-        campaignId,
-        model: options.model,
-        customPrompt: options.customPrompt
-      });
-      return result;
-    } catch (error) {
-      throw error;
-    }
+    return await queueLeadsMutation.mutateAsync({
+      campaignId,
+      model: options.model,
+      customPrompt: options.customPrompt
+    });
   }, [queueLeadsMutation]);
 
   // Process messages manually
@@ -209,16 +204,11 @@ export function useRedisWorkflow() {
       throw new Error('Campaign ID is required for message processing');
     }
 
-    try {
-      const result = await processMessagesMutation.mutateAsync({
-        batchSize: options.batchSize || 5,
-        consumerName: options.consumerName || 'manual-worker',
-        campaignId: options.campaignId
-      });
-      return result;
-    } catch (error) {
-      throw error;
-    }
+    return await processMessagesMutation.mutateAsync({
+      batchSize: options.batchSize || 5,
+      consumerName: options.consumerName || 'manual-worker',
+      campaignId: options.campaignId
+    });
   }, [processMessagesMutation]);
 
   return {
