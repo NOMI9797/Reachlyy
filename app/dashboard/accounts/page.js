@@ -43,7 +43,7 @@ const mockLinkedInAccounts = [
 export default function AccountsPage() {
   const { data: session, status } = useSession();
   const router = useRouter();
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const [accounts, setAccounts] = useState(mockLinkedInAccounts);
   const [selectedAccounts, setSelectedAccounts] = useState([]);
   const [currentPage, setCurrentPage] = useState(1);
