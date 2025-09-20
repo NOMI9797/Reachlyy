@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server';
 import LinkedInSessionManager from '@/libs/linkedin-session';
+import { withAuth } from "@/libs/auth-middleware";
 
 const sessionManager = new LinkedInSessionManager();
 
-export async function POST(request) {
+export const POST = withAuth(async (request, { user }) => {
   try {
     const { accountId, isActive } = await request.json();
 
@@ -53,4 +54,4 @@ export async function POST(request) {
       { status: 500 }
     );
   }
-}
+});

@@ -20,16 +20,8 @@ export const authOptions = {
         };
       },
     }),
-    // Follow the "Login with Email" tutorial to set up your email server
-    // Note: Email provider disabled for now - can be re-enabled with Neon DB adapter if needed
-    // EmailProvider({
-    //   server: process.env.EMAIL_SERVER,
-    //   from: config.mailgun.fromNoReply,
-    // }),
   ],
-  // Using JWT strategy instead of database adapter for simplicity
-  // Can be migrated to use Neon DB adapter later if needed
-
+  
   callbacks: {
     session: async ({ session, token }) => {
       if (session?.user) {
@@ -43,8 +35,6 @@ export const authOptions = {
   },
   theme: {
     brandColor: config.colors.main,
-    // Add you own logo below. Recommended size is rectangle (i.e. 200x50px) and show your logo + name.
-    // It will be used in the login flow to display your logo. If you don't add it, it will look faded.
     logo: `https://${config.domainName}/logoAndName.png`,
   },
 };

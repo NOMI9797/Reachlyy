@@ -1,20 +1,19 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/libs/next-auth";
 import { db } from "@/libs/db";
 import { campaigns, leads } from "@/libs/schema";
 import { eq, and } from "drizzle-orm";
+import { withAuth } from "@/libs/auth-middleware";
 
-// GET /api/campaigns/[id]/leads - Get leads for a campaign (like Reachly)
-export async function GET(request, { params }) {
+// GET /api/campaigns/[id]/leads - Get leads for a campaign (authenticated user)
+export const GET = withAuth(async (request, { params, user }) => {
   try {
     const campaignId = params.id;
 
-    // Check if campaign exists
+    // Check if campaign exists and belongs to user
     const [campaign] = await db
       .select()
       .from(campaigns)
-      .where(eq(campaigns.id, campaignId))
+      .where(and(eq(campaigns.id, campaignId), eq(campaigns.userId, user.id)))
       .limit(1);
 
     if (!campaign) {
@@ -24,11 +23,11 @@ export async function GET(request, { params }) {
       );
     }
 
-    // Get leads for this campaign
+    // Get leads for this campaign (ensure user owns the leads)
     const campaignLeads = await db
       .select()
       .from(leads)
-      .where(eq(leads.campaignId, campaignId))
+      .where(and(eq(leads.campaignId, campaignId), eq(leads.userId, user.id)))
       .orderBy(leads.createdAt);
 
     return NextResponse.json({
@@ -42,18 +41,18 @@ export async function GET(request, { params }) {
       { status: 500 }
     );
   }
-}
+});
 
-// POST /api/campaigns/[id]/leads - Add leads to a campaign (like Reachly)
-export async function POST(request, { params }) {
+// POST /api/campaigns/[id]/leads - Add leads to a campaign (authenticated user)
+export const POST = withAuth(async (request, { params, user }) => {
   try {
     const campaignId = params.id;
 
-    // Check if campaign exists
+    // Check if campaign exists and belongs to user
     const [campaign] = await db
       .select()
       .from(campaigns)
-      .where(eq(campaigns.id, campaignId))
+      .where(and(eq(campaigns.id, campaignId), eq(campaigns.userId, user.id)))
       .limit(1);
 
     if (!campaign) {
@@ -75,6 +74,7 @@ export async function POST(request, { params }) {
       );
 
       leadsToInsert = validUrls.map((url) => ({
+        userId: user.id,
         campaignId: campaignId,
         url: url.trim(),
         status: 'pending'
@@ -84,6 +84,7 @@ export async function POST(request, { params }) {
     // Handle CSV data
     if (csvData && Array.isArray(csvData)) {
       const csvLeads = csvData.map((row) => ({
+        userId: user.id,
         campaignId: campaignId,
         url: row.url || row.linkedinUrl || row.profile_url,
         name: row.name || row.fullName || row.full_name,
@@ -104,11 +105,11 @@ export async function POST(request, { params }) {
       }, { status: 400 });
     }
 
-    // Check for existing URLs in this campaign to prevent duplicates
+    // Check for existing URLs in this campaign to prevent duplicates (user-scoped)
     const existingLeads = await db
       .select({ url: leads.url })
       .from(leads)
-      .where(eq(leads.campaignId, campaignId));
+      .where(and(eq(leads.campaignId, campaignId), eq(leads.userId, user.id)));
     
     const existingUrls = new Set(existingLeads.map(lead => lead.url));
     const newLeads = leadsToInsert.filter(lead => !existingUrls.has(lead.url));
@@ -139,7 +140,7 @@ export async function POST(request, { params }) {
     await db
       .update(campaigns)
       .set(updates)
-      .where(eq(campaigns.id, campaignId));
+      .where(and(eq(campaigns.id, campaignId), eq(campaigns.userId, user.id)));
 
     console.log(`✅ LEADS ADDED: Successfully added ${insertedLeads.length} leads to campaign ${campaignId}`);
 
@@ -175,4 +176,4 @@ export async function POST(request, { params }) {
       { status: 500 }
     );
   }
-}
+});

@@ -3,6 +3,7 @@ import { chromium } from 'playwright';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import LinkedInSessionManager from '@/libs/linkedin-session';
+import { withAuth } from "@/libs/auth-middleware";
 
 // ---------- Anti-Detection Utilities ----------
 function randomDelay(min = 1000, max = 3000) {
@@ -167,7 +168,7 @@ async function connectLinkedInViaBrowser(sessionId) {
   }
 }
 
-export async function POST() {
+export const POST = withAuth(async (request, { user }) => {
   try {
     console.log('🚀 Starting LinkedIn connection process...');
     
@@ -223,4 +224,4 @@ export async function POST() {
       { status: 500 }
     );
   }
-}
+});

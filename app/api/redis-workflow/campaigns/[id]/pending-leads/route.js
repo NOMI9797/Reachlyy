@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import getRedisClient from "@/libs/redis";
+import { withAuth } from "@/libs/auth-middleware";
 
 /**
  * GET /api/redis-workflow/campaigns/[id]/pending-leads
@@ -14,7 +15,7 @@ import getRedisClient from "@/libs/redis";
  * @param {string} id - Campaign ID
  * @returns {object} Leads ready for message generation (without existing messages)
  */
-export async function GET(request, { params }) {
+export const GET = withAuth(async (request, { params, user }) => {
   try {
     const { id: campaignId } = params;
 
@@ -93,4 +94,4 @@ export async function GET(request, { params }) {
       { status: 500 }
     );
   }
-}
+});

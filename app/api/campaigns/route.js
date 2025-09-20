@@ -2,11 +2,12 @@ import { NextResponse } from "next/server";
 import { db } from "@/libs/db";
 import { campaigns, leads, messages } from "@/libs/schema.js";
 import { desc, eq, count, and } from "drizzle-orm";
+import { withAuth } from "@/libs/auth-middleware";
 
-// GET /api/campaigns - Get all campaigns (like Reachly)
-export async function GET() {
+// GET /api/campaigns - Get all campaigns for authenticated user
+export const GET = withAuth(async (request, { user }) => {
   try {
-    // Get all campaigns with their lead and message counts
+    // Get all campaigns for the authenticated user with their lead and message counts
     const allCampaigns = await db
       .select({
         id: campaigns.id,
@@ -19,8 +20,9 @@ export async function GET() {
         messagesGenerated: count(messages.id),
       })
       .from(campaigns)
-      .leftJoin(leads, eq(campaigns.id, leads.campaignId))
-      .leftJoin(messages, eq(campaigns.id, messages.campaignId))
+      .leftJoin(leads, and(eq(campaigns.id, leads.campaignId), eq(leads.userId, user.id)))
+      .leftJoin(messages, and(eq(campaigns.id, messages.campaignId), eq(messages.userId, user.id)))
+      .where(eq(campaigns.userId, user.id))
       .groupBy(campaigns.id)
       .orderBy(desc(campaigns.createdAt));
 
@@ -33,6 +35,7 @@ export async function GET() {
           .where(
             and(
               eq(leads.campaignId, campaign.id),
+              eq(leads.userId, user.id),
               eq(leads.status, 'completed')
             )
           );
@@ -44,6 +47,7 @@ export async function GET() {
           .where(
             and(
               eq(messages.campaignId, campaign.id),
+              eq(messages.userId, user.id),
               eq(messages.status, 'sent')
             )
           );
@@ -63,7 +67,7 @@ export async function GET() {
           newStatus = 'completed'; // All leads processed
         }
 
-        // Update campaign status if it changed
+        // Update campaign status if it changed (ensure user owns the campaign)
         if (newStatus !== campaign.status) {
           await db
             .update(campaigns)
@@ -71,7 +75,7 @@ export async function GET() {
               status: newStatus,
               updatedAt: new Date()
             })
-            .where(eq(campaigns.id, campaign.id));
+            .where(and(eq(campaigns.id, campaign.id), eq(campaigns.userId, user.id)));
         }
 
         return {
@@ -94,10 +98,10 @@ export async function GET() {
       { status: 500 }
     );
   }
-}
+});
 
-// POST /api/campaigns - Create a new campaign (like Reachly)
-export async function POST(request) {
+// POST /api/campaigns - Create a new campaign for authenticated user
+export const POST = withAuth(async (request, { user }) => {
   try {
     const { name, description } = await request.json();
 
@@ -111,6 +115,7 @@ export async function POST(request) {
     const [newCampaign] = await db
       .insert(campaigns)
       .values({
+        userId: user.id,
         name: name.trim(),
         description: description?.trim() || null,
         status: "draft",
@@ -128,4 +133,4 @@ export async function POST(request) {
       { status: 500 }
     );
   }
-}
+});

@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server';
 import LinkedInSessionManager from '@/libs/linkedin-session';
+import { withAuth } from "@/libs/auth-middleware";
 
 const sessionManager = new LinkedInSessionManager();
 
-export async function GET() {
+export const GET = withAuth(async (request, { user }) => {
   try {
     const sessions = sessionManager.getAllSessions();
     
@@ -37,9 +38,9 @@ export async function GET() {
       { status: 500 }
     );
   }
-}
+});
 
-export async function DELETE(request) {
+export const DELETE = withAuth(async (request, { user }) => {
   try {
     const { sessionId } = await request.json();
 
@@ -74,4 +75,4 @@ export async function DELETE(request) {
       { status: 500 }
     );
   }
-}
+});

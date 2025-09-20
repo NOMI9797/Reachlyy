@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { RedisStreamManager } from "@/libs/redis";
 import getRedisClient from "@/libs/redis";
+import { withAuth } from "@/libs/auth-middleware";
 
 /**
  * POST /api/redis-workflow/campaigns/[id]/queue-leads
@@ -17,7 +18,7 @@ import getRedisClient from "@/libs/redis";
  * @param {object} body - Request body with model and customPrompt
  * @returns {object} Queue status (optimized for speed)
  */
-export async function POST(request, { params }) {
+export const POST = withAuth(async (request, { params, user }) => {
   try {
     const { id: campaignId } = params;
     const { model = "llama-3.1-8b-instant", customPrompt } = await request.json();
@@ -148,4 +149,4 @@ export async function POST(request, { params }) {
       { status: 500 }
     );
   }
-}
+});

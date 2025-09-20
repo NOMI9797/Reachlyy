@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
 import { db } from "@/libs/db";
 import { leads, campaigns, posts, messages } from "@/libs/schema";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, and } from "drizzle-orm";
 import { generatePersonalizedMessage } from "@/libs/groq-service";
+import { withAuth } from "@/libs/auth-middleware";
 
-export async function POST(request) {
+export const POST = withAuth(async (request, { user }) => {
   try {
     const { leadId, customPrompt, model } = await request.json();
 
@@ -15,11 +16,11 @@ export async function POST(request) {
       );
     }
 
-    // Get lead information (like Reachly - no user auth)
+    // Get lead information (ensure user owns the lead)
     const [lead] = await db
       .select()
       .from(leads)
-      .where(eq(leads.id, leadId))
+      .where(and(eq(leads.id, leadId), eq(leads.userId, user.id)))
       .limit(1);
 
     if (!lead) {
@@ -29,11 +30,11 @@ export async function POST(request) {
       );
     }
 
-    // Get posts for this lead
+    // Get posts for this lead (ensure user owns the posts)
     const leadPosts = await db
       .select()
       .from(posts)
-      .where(eq(posts.leadId, leadId))
+      .where(and(eq(posts.leadId, leadId), eq(posts.userId, user.id)))
       .orderBy(desc(posts.engagement), desc(posts.timestamp))
       .limit(5);
 
@@ -62,6 +63,7 @@ export async function POST(request) {
     const [savedMessage] = await db
       .insert(messages)
       .values({
+        userId: user.id,
         leadId: leadId,
         campaignId: lead.campaignId,
         content: messageContent,
@@ -85,10 +87,10 @@ export async function POST(request) {
       { status: 500 }
     );
   }
-}
+});
 
-// GET /api/messages/generate - Get message history for a lead (like Reachly)
-export async function GET(request) {
+// GET /api/messages/generate - Get message history for a lead (authenticated user)
+export const GET = withAuth(async (request, { user }) => {
   try {
     const { searchParams } = new URL(request.url);
     const leadId = searchParams.get("leadId");
@@ -100,11 +102,11 @@ export async function GET(request) {
       );
     }
 
-    // Check if lead exists
+    // Check if lead exists and belongs to user
     const [lead] = await db
       .select()
       .from(leads)
-      .where(eq(leads.id, leadId))
+      .where(and(eq(leads.id, leadId), eq(leads.userId, user.id)))
       .limit(1);
 
     if (!lead) {
@@ -114,11 +116,11 @@ export async function GET(request) {
       );
     }
 
-    // Get messages for this lead
+    // Get messages for this lead (ensure user owns the messages)
     const leadMessages = await db
       .select()
       .from(messages)
-      .where(eq(messages.leadId, leadId))
+      .where(and(eq(messages.leadId, leadId), eq(messages.userId, user.id)))
       .orderBy(desc(messages.createdAt))
       .limit(50);
 
@@ -134,4 +136,4 @@ export async function GET(request) {
       { status: 500 }
     );
   }
-}
+});

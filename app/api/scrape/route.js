@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { ApifyClient } from "apify-client";
+import { withAuth } from "@/libs/auth-middleware";
 
-export async function POST(request) {
+export const POST = withAuth(async (request, { user }) => {
   try {
     const body = await request.json();
     const { urls, limitPerSource = 10, deepScrape = true, rawData = false, streamProgress = false } = body || {};
@@ -51,4 +52,4 @@ export async function POST(request) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json({ error: errorMessage }, { status: 500 });
   }
-}
+});
