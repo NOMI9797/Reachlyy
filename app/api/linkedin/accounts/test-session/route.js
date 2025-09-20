@@ -15,7 +15,7 @@ async function testLinkedInSession(sessionData) {
   const context = await chromium.launchPersistentContext(
     path.join(process.cwd(), 'linkedin-test-profiles', sessionData.sessionId),
     {
-      headless: false, // Run in headless mode for testing
+      headless: true, // Run in headless mode for testing
       viewport: { width: 1280, height: 720 },
     
     }
