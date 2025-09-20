@@ -20,6 +20,8 @@ import {
   Users,
   MessageSquare,
   X,
+  Shield,
+  Lock,
 } from "lucide-react";
 
 // Mock data for LinkedIn accounts
@@ -93,6 +95,12 @@ export default function AccountsPage() {
   const [selectedAccounts, setSelectedAccounts] = useState([]);
   const [currentPage, setCurrentPage] = useState(1);
   const accountsPerPage = 10;
+  const [showLinkedInModal, setShowLinkedInModal] = useState(false);
+  const [linkedInForm, setLinkedInForm] = useState({
+    email: '',
+    password: ''
+  });
+  const [isConnecting, setIsConnecting] = useState(false);
 
   // Redirect if not authenticated
   useEffect(() => {
@@ -122,6 +130,36 @@ export default function AccountsPage() {
     } else {
       setSelectedAccounts(paginatedAccounts.map(account => account.id));
     }
+  };
+
+  const handleLinkedInConnect = async (e) => {
+    e.preventDefault();
+    setIsConnecting(true);
+    
+    try {
+      // Simulate API call delay
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      // Here you would make the actual API call to connect the LinkedIn account
+      console.log('Connecting LinkedIn account:', linkedInForm);
+      
+      // Reset form and close modal
+      setLinkedInForm({ email: '', password: '' });
+      setShowLinkedInModal(false);
+      
+      // You might want to refresh the accounts list here
+      
+    } catch (error) {
+      console.error('Error connecting LinkedIn account:', error);
+    } finally {
+      setIsConnecting(false);
+    }
+  };
+
+  const handleCloseModal = () => {
+    setShowLinkedInModal(false);
+    setLinkedInForm({ email: '', password: '' });
+    setIsConnecting(false);
   };
 
 
@@ -171,6 +209,7 @@ export default function AccountsPage() {
           <div className="mb-6">
             <button 
               className="btn btn-primary gap-2"
+              onClick={() => setShowLinkedInModal(true)}
             >
               <Plus className="h-4 w-4" />
               Add Account
@@ -370,6 +409,7 @@ export default function AccountsPage() {
                 </p>
                 <button 
                   className="btn btn-primary gap-2"
+                  onClick={() => setShowLinkedInModal(true)}
                 >
                   <Plus className="h-4 w-4" />
                   Add LinkedIn Account
@@ -437,6 +477,130 @@ export default function AccountsPage() {
           )}
         </div>
       </div>
+
+      {/* LinkedIn Connection Modal */}
+      {showLinkedInModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-base-100 rounded-2xl shadow-2xl w-full max-w-md mx-auto">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between p-6 border-b border-base-300">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 bg-blue-600 rounded flex items-center justify-center">
+                  <span className="text-white text-sm font-bold">in</span>
+                </div>
+                <h3 className="text-lg font-semibold text-base-content">
+                  Connect LinkedIn Account
+                </h3>
+              </div>
+              <button 
+                onClick={handleCloseModal}
+                className="btn btn-ghost btn-sm btn-circle"
+                disabled={isConnecting}
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6">
+              {/* Security Notice */}
+              <div className="bg-success/10 border border-success/20 rounded-lg p-4 mb-6">
+                <div className="flex items-start gap-3">
+                  <Shield className="h-5 w-5 text-success flex-shrink-0 mt-0.5" />
+                  <div>
+                    <h4 className="text-sm font-medium text-success mb-1">Your Data is Secure</h4>
+                    <p className="text-xs text-success/80">
+                      Your credentials are encrypted and stored securely. We use industry-standard security measures to protect your information.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <form onSubmit={handleLinkedInConnect} className="space-y-4">
+                {/* Email Field */}
+                <div>
+                  <label className="label">
+                    <span className="label-text text-sm font-medium">LinkedIn Email</span>
+                  </label>
+                  <input
+                    type="email"
+                    placeholder="Enter your LinkedIn email"
+                    className="input input-bordered w-full"
+                    value={linkedInForm.email}
+                    onChange={(e) => setLinkedInForm(prev => ({
+                      ...prev,
+                      email: e.target.value
+                    }))}
+                    required
+                    disabled={isConnecting}
+                  />
+                </div>
+
+                {/* Password Field */}
+                <div>
+                  <label className="label">
+                    <span className="label-text text-sm font-medium">LinkedIn Password</span>
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="password"
+                      placeholder="Enter your LinkedIn password"
+                      className="input input-bordered w-full pr-10"
+                      value={linkedInForm.password}
+                      onChange={(e) => setLinkedInForm(prev => ({
+                        ...prev,
+                        password: e.target.value
+                      }))}
+                      required
+                      disabled={isConnecting}
+                    />
+                    <Lock className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-base-content/40" />
+                  </div>
+                </div>
+
+                {/* Additional Security Info */}
+                <div className="bg-info/10 border border-info/20 rounded-lg p-3">
+                  <div className="flex items-center gap-2 text-xs text-info">
+                    <Lock className="h-3 w-3 flex-shrink-0" />
+                    <span>End-to-end encrypted • Never shared with third parties</span>
+                  </div>
+                </div>
+
+                {/* Action Buttons */}
+                <div className="flex gap-3 pt-4">
+                  <button
+                    type="button"
+                    onClick={handleCloseModal}
+                    className="btn btn-ghost btn-sm flex-1"
+                    disabled={isConnecting}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="btn btn-primary btn-sm flex-1 gap-2"
+                    disabled={isConnecting || !linkedInForm.email || !linkedInForm.password}
+                  >
+                    {isConnecting ? (
+                      <>
+                        <span className="loading loading-spinner loading-xs"></span>
+                        <span className="text-xs">Connecting...</span>
+                      </>
+                    ) : (
+                      <>
+                        <div className="w-3 h-3 bg-blue-600 rounded flex items-center justify-center">
+                          <span className="text-white text-xs font-bold">in</span>
+                        </div>
+                        <span className="text-xs">Connect Account</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );
