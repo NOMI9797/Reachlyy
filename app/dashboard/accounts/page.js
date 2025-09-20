@@ -92,13 +92,6 @@ export default function AccountsPage() {
   const [accounts] = useState(mockLinkedInAccounts);
   const [selectedAccounts, setSelectedAccounts] = useState([]);
   const [currentPage, setCurrentPage] = useState(1);
-  const [showAddAccountModal, setShowAddAccountModal] = useState(false);
-  const [formData, setFormData] = useState({
-    email: "",
-    password: ""
-  });
-  const [formErrors, setFormErrors] = useState({});
-  const [isConnecting, setIsConnecting] = useState(false);
   const accountsPerPage = 10;
 
   // Redirect if not authenticated
@@ -131,70 +124,6 @@ export default function AccountsPage() {
     }
   };
 
-  const handleInputChange = (e) => {
-    const { name, value } = e.target;
-    setFormData(prev => ({
-      ...prev,
-      [name]: value
-    }));
-    // Clear error when user starts typing
-    if (formErrors[name]) {
-      setFormErrors(prev => ({
-        ...prev,
-        [name]: ""
-      }));
-    }
-  };
-
-  const validateForm = () => {
-    const errors = {};
-    
-    if (!formData.email.trim()) {
-      errors.email = "Email is required";
-    } else if (!/\S+@\S+\.\S+/.test(formData.email)) {
-      errors.email = "Please enter a valid email address";
-    }
-    
-    if (!formData.password.trim()) {
-      errors.password = "Password is required";
-    } else if (formData.password.length < 6) {
-      errors.password = "Password must be at least 6 characters";
-    }
-    
-    setFormErrors(errors);
-    return Object.keys(errors).length === 0;
-  };
-
-  const handleConnectAccount = async () => {
-    if (!validateForm()) return;
-    
-    setIsConnecting(true);
-    
-    try {
-      // Simulate API call - replace with actual LinkedIn connection logic
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
-      // Reset form and close modal on success
-      setFormData({ email: "", password: "" });
-      setFormErrors({});
-      setShowAddAccountModal(false);
-      
-      // Show success message (you can use toast here)
-      console.log("LinkedIn account connected successfully!");
-      
-    } catch (error) {
-      console.error("Error connecting LinkedIn account:", error);
-      // Handle error (show error message)
-    } finally {
-      setIsConnecting(false);
-    }
-  };
-
-  const handleCloseModal = () => {
-    setFormData({ email: "", password: "" });
-    setFormErrors({});
-    setShowAddAccountModal(false);
-  };
 
   if (status === "loading") {
     return (
@@ -241,13 +170,13 @@ export default function AccountsPage() {
           {/* Add Account Button */}
           <div className="mb-6">
             <button 
-              onClick={() => setShowAddAccountModal(true)}
               className="btn btn-primary gap-2"
             >
               <Plus className="h-4 w-4" />
               Add Account
             </button>
           </div>
+
 
           {/* Pagination Controls */}
           <div className="flex items-center justify-end mb-4">
@@ -440,7 +369,6 @@ export default function AccountsPage() {
                   Get started by connecting your first LinkedIn account
                 </p>
                 <button 
-                  onClick={() => setShowAddAccountModal(true)}
                   className="btn btn-primary gap-2"
                 >
                   <Plus className="h-4 w-4" />
@@ -510,118 +438,6 @@ export default function AccountsPage() {
         </div>
       </div>
 
-      {/* Add Account Modal */}
-      {showAddAccountModal && (
-        <div className="modal modal-open">
-          <div className="modal-box w-11/12 max-w-md">
-            {/* Header */}
-            <div className="flex items-center justify-between mb-6">
-              <h3 className="text-lg font-bold text-base-content">Connect LinkedIn Account</h3>
-              <button
-                onClick={handleCloseModal}
-                className="btn btn-sm btn-circle btn-ghost"
-                disabled={isConnecting}
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            {/* Form */}
-            <form onSubmit={(e) => { e.preventDefault(); handleConnectAccount(); }} className="space-y-4">
-              {/* LinkedIn Branding */}
-              <div className="flex items-center gap-3 mb-6 p-4 bg-base-200 rounded-lg">
-                <div className="w-12 h-12 bg-blue-600 rounded-lg flex items-center justify-center">
-                  <span className="text-white text-lg font-bold">in</span>
-                </div>
-                <div>
-                  <div className="font-medium text-base-content">LinkedIn</div>
-                  <div className="text-sm text-base-content/60">Professional networking platform</div>
-                </div>
-              </div>
-
-              {/* Email Field */}
-              <div className="form-control">
-                <label className="label" htmlFor="email">
-                  <span className="label-text font-medium">LinkedIn Email</span>
-                  <span className="label-text-alt text-error">*</span>
-                </label>
-                <input
-                  id="email"
-                  name="email"
-                  type="email"
-                  placeholder="Enter your LinkedIn email"
-                  className={`input input-bordered w-full ${
-                    formErrors.email ? "input-error" : ""
-                  }`}
-                  value={formData.email}
-                  onChange={handleInputChange}
-                  disabled={isConnecting}
-                />
-                {formErrors.email && (
-                  <label className="label">
-                    <span className="label-text-alt text-error">{formErrors.email}</span>
-                  </label>
-                )}
-              </div>
-              
-              {/* Password Field */}
-              <div className="form-control">
-                <label className="label" htmlFor="password">
-                  <span className="label-text font-medium">LinkedIn Password</span>
-                  <span className="label-text-alt text-error">*</span>
-                </label>
-                <input
-                  id="password"
-                  name="password"
-                  type="password"
-                  placeholder="Enter your LinkedIn password"
-                  className={`input input-bordered w-full ${
-                    formErrors.password ? "input-error" : ""
-                  }`}
-                  value={formData.password}
-                  onChange={handleInputChange}
-                  disabled={isConnecting}
-                />
-                {formErrors.password && (
-                  <label className="label">
-                    <span className="label-text-alt text-error">{formErrors.password}</span>
-                  </label>
-                )}
-              </div>
-
-              {/* Actions */}
-              <div className="modal-action">
-                <button
-                  type="button"
-                  onClick={handleCloseModal}
-                  className="btn btn-ghost"
-                  disabled={isConnecting}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="btn btn-primary gap-2"
-                  disabled={isConnecting || !formData.email.trim() || !formData.password.trim()}
-                >
-                  {isConnecting ? (
-                    <>
-                      <div className="loading loading-spinner loading-sm"></div>
-                      Connecting...
-                    </>
-                  ) : (
-                    <>
-                      <Plus className="h-4 w-4" />
-                      Connect LinkedIn
-                    </>
-                  )}
-                </button>
-              </div>
-            </form>
-          </div>
-          <div className="modal-backdrop" onClick={handleCloseModal}></div>
-        </div>
-      )}
     </div>
   );
 }
