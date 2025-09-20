@@ -58,7 +58,12 @@ export async function POST(request) {
         .where(eq(leads.campaignId, campaign.id))
         .limit(1000); // Bulk fetch up to 1000 leads per campaign
 
-      console.log(`📦 PRE-FETCH: ${campaign.name} (${campaign.id}) → ${campaignLeads.length} leads`);
+      // Get existing messages for this campaign
+      const campaignMessages = await db.select()
+        .from(messages)
+        .where(eq(messages.campaignId, campaign.id));
+
+      console.log(`📦 PRE-FETCH: ${campaign.name} (${campaign.id}) → ${campaignLeads.length} leads, ${campaignMessages.length} messages`);
 
       // Store campaign data in Redis
       await redis.hset(`campaign:${campaign.id}:data`, {
@@ -66,6 +71,7 @@ export async function POST(request) {
         name: campaign.name,
         status: campaign.status,
         leadsCount: campaignLeads.length,
+        messagesCount: campaignMessages.length,
         lastUpdated: Date.now()
       });
 
@@ -85,6 +91,26 @@ export async function POST(request) {
         
         await redis.hset(`campaign:${campaign.id}:leads`, leadsData);
         totalLeadsCached += campaignLeads.length;
+      }
+
+      // Store messages data in Redis (bulk)
+      if (campaignMessages.length > 0) {
+        const messagesData = {};
+        campaignMessages.forEach(message => {
+          messagesData[message.leadId] = JSON.stringify({
+            id: message.id,
+            leadId: message.leadId,
+            campaignId: message.campaignId,
+            content: message.content,
+            model: message.model,
+            customPrompt: message.customPrompt,
+            status: message.status,
+            createdAt: message.createdAt
+          });
+        });
+        
+        await redis.hset(`campaign:${campaign.id}:messages`, messagesData);
+        console.log(`💾 PRE-FETCH: Cached ${campaignMessages.length} messages for campaign ${campaign.id}`);
       }
       
       campaignsCached++;

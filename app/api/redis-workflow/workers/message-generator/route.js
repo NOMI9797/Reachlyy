@@ -14,9 +14,9 @@ import getRedisClient from "@/libs/redis";
  * This worker:
  * 1. Consumes leads from Redis stream for a specific campaign
  * 2. Generates AI messages
- * 3. Updates Redis cache first
- * 4. Performs bulk DB updates
- * 5. Invalidates cache
+ * 3. Updates Redis cache FIRST (immediate availability)
+ * 4. Performs bulk DB updates SECOND (persistence)
+ * 5. Updates campaign metadata
  */
 export async function POST(request) {
   try {
@@ -153,24 +153,48 @@ export async function POST(request) {
         }
       }
 
-      // Bulk insert messages to database
+      // Redis-First: Update Redis cache immediately, then database
       if (messagesToInsert.length > 0) {
         try {
+          // 1. REDIS FIRST: Update Redis message cache immediately
+          const messagesData = {};
+          messagesToInsert.forEach(message => {
+            messagesData[message.leadId] = JSON.stringify({
+              id: message.id || `temp-${Date.now()}-${message.leadId}`, // Use temp ID if not available
+              leadId: message.leadId,
+              campaignId: message.campaignId,
+              content: message.content,
+              model: message.model,
+              customPrompt: message.customPrompt,
+              status: message.status,
+              createdAt: new Date().toISOString()
+            });
+          });
+          
+          await redis.hset(`campaign:${campaignId}:messages`, messagesData);
+          console.log(`🚀 REDIS-FIRST: Updated Redis message cache with ${messagesToInsert.length} new messages for campaign ${campaignId}`);
+          
+          // 2. DATABASE SECOND: Insert to database after Redis update
           await db.insert(messages).values(messagesToInsert);
-          console.log(`💾 Inserted ${messagesToInsert.length} messages to database for campaign ${campaignId}`);
+          console.log(`💾 DATABASE: Inserted ${messagesToInsert.length} messages to database for campaign ${campaignId}`);
+          
         } catch (error) {
-          console.error(`❌ Redis-First: Bulk insert failed for campaign ${campaignId}:`, error);
+          console.error(`❌ Redis-First: Failed to update cache or database for campaign ${campaignId}:`, error);
         }
       }
 
       // Update Redis cache for the campaign
       if (processedCount > 0) {
         try {
-          // Update campaign data timestamp
+          // Update campaign data timestamp and message count
           const currentData = await redis.hgetall(`campaign:${campaignId}:data`);
           if (currentData && currentData.leadsCount) {
-            await redis.hset(`campaign:${campaignId}:data`, 'lastUpdated', Date.now());
-            console.log(`🔄 Updated cache timestamp for campaign ${campaignId}`);
+            const currentMessagesCount = parseInt(currentData.messagesCount) || 0;
+            await redis.hset(`campaign:${campaignId}:data`, {
+              'lastUpdated': Date.now(),
+              'messagesCount': currentMessagesCount + processedCount
+            });
+            console.log(`🔄 Updated cache timestamp and message count for campaign ${campaignId}`);
           }
         } catch (error) {
           console.log(`⚠️ Cache update error for campaign ${campaignId}:`, error.message);

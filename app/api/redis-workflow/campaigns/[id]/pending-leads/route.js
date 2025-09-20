@@ -1,8 +1,5 @@
 import { NextResponse } from "next/server";
 import getRedisClient from "@/libs/redis";
-import { db } from "@/libs/db";
-import { messages } from "@/libs/schema";
-import { eq } from "drizzle-orm";
 
 /**
  * GET /api/redis-workflow/campaigns/[id]/pending-leads
@@ -30,12 +27,14 @@ export async function GET(request, { params }) {
 
     const redis = getRedisClient();
     
-    // Use Redis pipeline for single round trip (though only one call here, keeping consistent pattern)
+    // Use Redis pipeline for single round trip
     const pipeline = redis.pipeline();
     pipeline.hgetall(`campaign:${campaignId}:leads`);
+    pipeline.hgetall(`campaign:${campaignId}:messages`);
     
     const results = await pipeline.exec();
     const leadsData = results[0][1]; // [error, result] format
+    const messagesData = results[1][1];
     
     if (!leadsData || Object.keys(leadsData).length === 0) {
       // No leads found in Redis cache
@@ -52,13 +51,14 @@ export async function GET(request, { params }) {
 
     const leads = Object.values(leadsData).map(leadStr => JSON.parse(leadStr));
 
-    // Get existing messages for this campaign (bulk query)
-    const existingMessages = await db.select()
-      .from(messages)
-      .where(eq(messages.campaignId, campaignId));
-
-    // Create a set of lead IDs that already have messages
-    const leadsWithMessages = new Set(existingMessages.map(msg => msg.leadId));
+    // Create a set of lead IDs that already have messages from Redis cache
+    const leadsWithMessages = new Set();
+    if (messagesData && Object.keys(messagesData).length > 0) {
+      Object.values(messagesData).forEach(messageStr => {
+        const message = JSON.parse(messageStr);
+        leadsWithMessages.add(message.leadId);
+      });
+    }
 
     // Filter out leads that already have messages and exclude error leads
     const leadsReadyForMessages = leads.filter(lead => 

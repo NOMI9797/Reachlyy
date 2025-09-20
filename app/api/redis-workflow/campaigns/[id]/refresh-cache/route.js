@@ -47,24 +47,33 @@ export async function POST(request, { params }) {
       .from(leads)
       .where(eq(leads.campaignId, campaignId));
 
-    console.log(`📦 CACHE REFRESH: Found ${campaignLeads.length} leads in DB for campaign ${campaignId}`);
+    // Step 3: Fetch fresh messages data from DB
+    console.log(`📊 CACHE REFRESH: Fetching messages data from DB for campaign ${campaignId}`);
+    const campaignMessages = await db
+      .select()
+      .from(messages)
+      .where(eq(messages.campaignId, campaignId));
 
-    // Step 3: Clear existing Redis cache for this campaign
+    console.log(`📦 CACHE REFRESH: Found ${campaignLeads.length} leads and ${campaignMessages.length} messages in DB for campaign ${campaignId}`);
+
+    // Step 4: Clear existing Redis cache for this campaign
     console.log(`🗑️ CACHE REFRESH: Clearing existing Redis cache for campaign ${campaignId}`);
     await redis.del(`campaign:${campaignId}:data`);
     await redis.del(`campaign:${campaignId}:leads`);
+    await redis.del(`campaign:${campaignId}:messages`);
 
-    // Step 4: Update Redis with fresh campaign data
+    // Step 5: Update Redis with fresh campaign data
     console.log(`💾 CACHE REFRESH: Updating Redis with fresh campaign data for ${campaignId}`);
     await redis.hset(`campaign:${campaignId}:data`, {
       id: campaignData.id,
       name: campaignData.name,
       status: campaignData.status,
       leadsCount: campaignLeads.length,
+      messagesCount: campaignMessages.length,
       lastUpdated: Date.now()
     });
 
-    // Step 5: Update Redis with fresh leads data
+    // Step 6: Update Redis with fresh leads data
     if (campaignLeads.length > 0) {
       console.log(`💾 CACHE REFRESH: Updating Redis with ${campaignLeads.length} fresh leads for campaign ${campaignId}`);
       const leadsData = {};
@@ -84,13 +93,35 @@ export async function POST(request, { params }) {
       await redis.hset(`campaign:${campaignId}:leads`, leadsData);
     }
 
-    // Step 6: Verify cache update
+    // Step 7: Update Redis with fresh messages data
+    if (campaignMessages.length > 0) {
+      console.log(`💾 CACHE REFRESH: Updating Redis with ${campaignMessages.length} fresh messages for campaign ${campaignId}`);
+      const messagesData = {};
+      campaignMessages.forEach(message => {
+        messagesData[message.leadId] = JSON.stringify({
+          id: message.id,
+          leadId: message.leadId,
+          campaignId: message.campaignId,
+          content: message.content,
+          model: message.model,
+          customPrompt: message.customPrompt,
+          status: message.status,
+          createdAt: message.createdAt
+        });
+      });
+      
+      await redis.hset(`campaign:${campaignId}:messages`, messagesData);
+    }
+
+    // Step 8: Verify cache update
     const cachedCampaignData = await redis.hgetall(`campaign:${campaignId}:data`);
     const cachedLeadsData = await redis.hgetall(`campaign:${campaignId}:leads`);
+    const cachedMessagesData = await redis.hgetall(`campaign:${campaignId}:messages`);
     
     console.log(`✅ CACHE REFRESH: Successfully refreshed cache for campaign ${campaignId}`);
     console.log(`📊 CACHE REFRESH: Campaign data cached: ${Object.keys(cachedCampaignData).length} fields`);
     console.log(`📊 CACHE REFRESH: Leads data cached: ${Object.keys(cachedLeadsData).length} leads`);
+    console.log(`📊 CACHE REFRESH: Messages data cached: ${Object.keys(cachedMessagesData).length} messages`);
 
     return NextResponse.json({
       success: true,

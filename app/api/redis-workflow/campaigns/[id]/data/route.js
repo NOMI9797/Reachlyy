@@ -23,12 +23,14 @@ export async function GET(request, { params }) {
     const pipeline = redis.pipeline();
     pipeline.hgetall(`campaign:${campaignId}:data`);
     pipeline.hgetall(`campaign:${campaignId}:leads`);
+    pipeline.hgetall(`campaign:${campaignId}:messages`);
     
     const results = await pipeline.exec();
     
     // Extract results from pipeline
     const campaignData = results[0][1]; // [error, result] format
     const leadsData = results[1][1];
+    const messagesData = results[2][1];
     
     if (!campaignData || Object.keys(campaignData).length === 0) {
       return NextResponse.json(
@@ -39,21 +41,14 @@ export async function GET(request, { params }) {
 
     const leads = Object.values(leadsData).map(leadStr => JSON.parse(leadStr));
 
-    // Get existing messages for these leads (bulk query)
-    const leadIds = leads.map(lead => lead.id);
-    let existingMessages = [];
-    
-    if (leadIds.length > 0) {
-      existingMessages = await db.select()
-        .from(messages)
-        .where(eq(messages.campaignId, campaignId));
-    }
-
-    // Create a map of leadId -> message for quick lookup
+    // Create a map of leadId -> message for quick lookup from Redis cache
     const messageMap = {};
-    existingMessages.forEach(message => {
-      messageMap[message.leadId] = message;
-    });
+    if (messagesData && Object.keys(messagesData).length > 0) {
+      Object.values(messagesData).forEach(messageStr => {
+        const message = JSON.parse(messageStr);
+        messageMap[message.leadId] = message;
+      });
+    }
 
     // Add message status to each lead
     const leadsWithMessageStatus = leads.map(lead => ({
@@ -63,7 +58,7 @@ export async function GET(request, { params }) {
       messageStatus: messageMap[lead.id]?.status || null
     }));
 
-    console.log(`✅ Redis-First: Retrieved ${leads.length} leads (${existingMessages.length} with messages) from Redis for campaign ${campaignId}`);
+    console.log(`✅ Redis-First: Retrieved ${leads.length} leads (${Object.keys(messageMap).length} with messages) from Redis for campaign ${campaignId}`);
 
     return NextResponse.json({
       success: true,
