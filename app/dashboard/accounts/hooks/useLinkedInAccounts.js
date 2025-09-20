@@ -26,13 +26,15 @@ export function useLinkedInAccounts() {
 
   // Connect account mutation
   const connectAccountMutation = useMutation({
-    mutationFn: linkedinAccountApi.connectAccount,
+    mutationFn: ({ email, password }) => linkedinAccountApi.connectAccount(email, password),
+    retry: false, // Disable automatic retries for connection attempts
     onSuccess: () => {
+      console.log("✅ LinkedIn account connected successfully");
       // Invalidate and refetch accounts list
       queryClient.invalidateQueries({ queryKey: linkedinAccountKeys.lists() });
     },
     onError: (error) => {
-      console.error("Failed to connect LinkedIn account:", error);
+      console.error("❌ Failed to connect LinkedIn account:", error);
     },
   });
 
@@ -120,8 +122,8 @@ export function useLinkedInAccounts() {
   });
 
   // Connect account function
-  const connectAccount = async () => {
-    return connectAccountMutation.mutateAsync();
+  const connectAccount = async (email, password) => {
+    return connectAccountMutation.mutateAsync({ email, password });
   };
 
   // Toggle account status function

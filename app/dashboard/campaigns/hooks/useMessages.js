@@ -117,6 +117,9 @@ export function useMessages() {
       const cachedMessages = queryClient.getQueryData(messageKeys.forLead(leadId));
       if (cachedMessages && cachedMessages.length > 0) {
         setGeneratedMessage(cachedMessages[0].content);
+      } else {
+        // Clear message if no cached messages found for this lead
+        setGeneratedMessage("");
       }
     }
   };
