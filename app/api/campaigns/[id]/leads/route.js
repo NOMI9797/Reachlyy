@@ -141,6 +141,26 @@ export async function POST(request, { params }) {
       .set(updates)
       .where(eq(campaigns.id, campaignId));
 
+    console.log(`✅ LEADS ADDED: Successfully added ${insertedLeads.length} leads to campaign ${campaignId}`);
+
+    // Refresh Redis cache for this campaign after adding leads
+    console.log(`🔄 CACHE REFRESH: Triggering cache refresh for campaign ${campaignId} after adding leads`);
+    try {
+      const refreshResponse = await fetch(`${process.env.NEXTAUTH_URL || 'http://localhost:8085'}/api/redis-workflow/campaigns/${campaignId}/refresh-cache`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      
+      if (refreshResponse.ok) {
+        const refreshData = await refreshResponse.json();
+        console.log(`✅ CACHE REFRESH: Successfully refreshed cache for campaign ${campaignId}: ${refreshData.data.leadsCount} leads cached`);
+      } else {
+        console.log(`⚠️ CACHE REFRESH: Failed to refresh cache for campaign ${campaignId}: ${refreshResponse.status}`);
+      }
+    } catch (error) {
+      console.log(`⚠️ CACHE REFRESH: Error refreshing cache for campaign ${campaignId}: ${error.message}`);
+    }
+
     return NextResponse.json({
       success: true,
       message: `Successfully added ${insertedLeads.length} leads`,
