@@ -1,11 +1,13 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { ArrowLeft, Settings, Maximize2, Minimize2, Zap, Target, MessageSquare, BarChart3 } from "lucide-react";
+import { ArrowLeft, Settings, Maximize2, Minimize2, Zap, Target, MessageSquare, BarChart3, Loader2 } from "lucide-react";
 import LeadsColumn from "./LeadsColumn";
 import PostsColumn from "./PostsColumn";
 import AIResponseColumn from "./AIResponseColumn";
 import { useLeads } from "../hooks/useLeads";
+import { useBulkMessageGeneration } from "../hooks/useBulkMessageGeneration";
+import { useRedisWorkflow } from "../hooks/useRedisWorkflow";
 
 export default function CampaignWorkspace({ campaign, onBack }) {
   const [selectedLead, setSelectedLead] = useState(null);
@@ -33,6 +35,27 @@ export default function CampaignWorkspace({ campaign, onBack }) {
     customPrompt: "",
   });
 
+  // Redis Workflow (New System)
+  const {
+    isProcessing,
+    queueAllPendingLeads,
+    processMessages,
+    useLeadsReadyForMessages,
+    useGenerationStatus,
+    isQueueing,
+    isProcessingMessages
+  } = useRedisWorkflow();
+  
+  const [showBulkMessageDialog, setShowBulkMessageDialog] = useState(false);
+
+  // Get Redis workflow data
+  const { data: leadsReadyData, isLoading: loadingLeadsReady } = useLeadsReadyForMessages(campaign?.id);
+  const { data: statusData, isLoading: loadingStatus } = useGenerationStatus(campaign?.id);
+  
+  const leadsReadyCount = leadsReadyData?.data?.count || 0;
+  const redisStatus = statusData?.data || {};
+  const completedLeadsCount = leads.filter(lead => lead.status === 'completed').length;
+
   const containerRef = useRef(null);
   const isDragging = useRef(false);
   const dragColumn = useRef(-1);
@@ -43,6 +66,21 @@ export default function CampaignWorkspace({ campaign, onBack }) {
       fetchLeads(campaign.id);
     }
   }, [campaign?.id, fetchLeads]);
+
+  // Handle Redis workflow message generation
+  const handleBulkGenerateMessages = async () => {
+    try {
+      // Process messages for the current campaign only
+      await processMessages({
+        batchSize: 5,
+        consumerName: 'manual-generate',
+        campaignId: campaign.id
+      });
+      setShowBulkMessageDialog(false);
+    } catch (error) {
+      console.error('Error in Redis workflow message generation:', error);
+    }
+  };
 
   // Column resizing logic
   const handleMouseDown = (columnIndex) => (e) => {
@@ -358,6 +396,77 @@ export default function CampaignWorkspace({ campaign, onBack }) {
                       />
                     </label>
                   </div>
+
+                  {/* Generate All Messages Button */}
+                  {completedLeadsCount > 0 && (
+                    <div className="divider"></div>
+                  )}
+                  
+                  {completedLeadsCount > 0 && (
+                    <div className="space-y-3">
+                      <h4 className="font-semibold">Message Generation</h4>
+                      <button
+                        onClick={() => setShowBulkMessageDialog(true)}
+                        disabled={isProcessing || loadingLeadsReady}
+                        className="btn btn-primary w-full gap-2"
+                      >
+                        <MessageSquare className="h-4 w-4" />
+                        {isProcessing ? "Processing..." : 
+                         loadingLeadsReady ? "Loading..." :
+                         `Generate Messages (${leadsReadyCount || completedLeadsCount})`}
+                      </button>
+                      <div className="text-xs text-base-content/60">
+                        Generate personalized messages for all completed leads that don't have messages yet.
+                      </div>
+                      
+                      {/* Redis Workflow Status */}
+                      {redisStatus.redis && (
+                        <div className="mt-3 p-3 bg-base-200 rounded-lg">
+                          <div className="text-xs font-semibold mb-2">Redis Workflow Status</div>
+                          <div className="grid grid-cols-2 gap-2 text-xs">
+                            <div>
+                              <span className="text-base-content/60">Pending:</span>
+                              <span className="ml-1 font-medium">{redisStatus.leads?.pending || 0}</span>
+                            </div>
+                            <div>
+                              <span className="text-base-content/60">Completed:</span>
+                              <span className="ml-1 font-medium">{redisStatus.leads?.completed || 0}</span>
+                            </div>
+                            <div>
+                              <span className="text-base-content/60">Messages:</span>
+                              <span className="ml-1 font-medium">{redisStatus.messages?.total || 0}</span>
+                            </div>
+                            <div>
+                              <span className="text-base-content/60">Queue:</span>
+                              <span className="ml-1 font-medium">{redisStatus.redis?.queueLength || 0}</span>
+                            </div>
+                          </div>
+                          {isProcessingMessages && (
+                            <div className="mt-2 text-xs text-primary">
+                              <Loader2 className="h-3 w-3 inline animate-spin mr-1" />
+                              Processing messages...
+                            </div>
+                          )}
+                          {redisStatus.redis?.queueLength > 0 && !isProcessingMessages && (
+                            <div className="mt-2">
+                              <button
+                                onClick={() => processMessages({
+                                  batchSize: 5,
+                                  consumerName: 'manual-process',
+                                  campaignId: campaign.id
+                                })}
+                                className="btn btn-xs btn-primary gap-1"
+                                disabled={isProcessingMessages}
+                              >
+                                <Zap className="h-3 w-3" />
+                                Process Queue ({redisStatus.redis.queueLength})
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
               {activeColumn === 'posts' && (
@@ -430,6 +539,47 @@ export default function CampaignWorkspace({ campaign, onBack }) {
                   </div>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Message Generation Confirmation Dialog */}
+      {showBulkMessageDialog && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-base-100 rounded-lg p-6 max-w-md mx-4">
+            <h3 className="font-bold text-lg mb-4">Generate Messages for All Completed Leads</h3>
+            <p className="text-base-content/80 mb-4">
+              This will generate personalized messages for {leadsReadyCount || completedLeadsCount} completed lead{(leadsReadyCount || completedLeadsCount) > 1 ? 's' : ''} that don't have messages yet.
+            </p>
+            <p className="text-sm text-base-content/60 mb-6">
+              Each message will be generated based on the lead's scraped posts and engagement data using the {aiSettings.model} model. This process may take a few minutes.
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setShowBulkMessageDialog(false)}
+                disabled={isProcessing}
+                className="btn btn-ghost btn-sm"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleBulkGenerateMessages}
+                disabled={isProcessing}
+                className="btn btn-primary btn-sm gap-1"
+              >
+                {isProcessing ? (
+                  <>
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    Generating...
+                  </>
+                ) : (
+                  <>
+                    <MessageSquare className="h-3 w-3" />
+                    Generate Messages
+                  </>
+                )}
+              </button>
             </div>
           </div>
         </div>
