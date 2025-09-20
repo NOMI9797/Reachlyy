@@ -7,6 +7,8 @@ const nextConfig = {
       "pbs.twimg.com",
       "images.unsplash.com",
       "logos-world.net",
+      "media.licdn.com", // LinkedIn profile images
+      "static.licdn.com", // LinkedIn static assets
     ],
   },
 };

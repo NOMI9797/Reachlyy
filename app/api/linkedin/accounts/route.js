@@ -1,0 +1,77 @@
+import { NextResponse } from 'next/server';
+import LinkedInSessionManager from '@/libs/linkedin-session';
+
+const sessionManager = new LinkedInSessionManager();
+
+export async function GET() {
+  try {
+    const sessions = sessionManager.getAllSessions();
+    
+    // Transform sessions to account format
+    const accounts = sessions.map(session => ({
+      id: session.sessionId,
+      email: session.email,
+      name: session.userName || session.email, // Use actual name, fallback to email
+      profileImageUrl: session.profileImageUrl || null,
+      isActive: session.isActive || false,
+      connectionInvites: 0, // Default values
+      followUpMessages: 0,
+      addedDate: new Date(session.createdAt).toLocaleDateString(),
+      tags: [],
+      salesNavActive: true,
+      lastUsed: session.lastUsed
+    }));
+
+    return NextResponse.json({
+      success: true,
+      accounts
+    });
+
+  } catch (error) {
+    console.error('Error fetching LinkedIn accounts:', error);
+    return NextResponse.json(
+      { 
+        error: 'FETCH_ERROR',
+        message: 'Failed to fetch LinkedIn accounts'
+      },
+      { status: 500 }
+    );
+  }
+}
+
+export async function DELETE(request) {
+  try {
+    const { sessionId } = await request.json();
+
+    if (!sessionId) {
+      return NextResponse.json(
+        { error: 'Session ID is required' },
+        { status: 400 }
+      );
+    }
+
+    const deleted = sessionManager.deleteSession(sessionId);
+
+    if (deleted) {
+      return NextResponse.json({
+        success: true,
+        message: 'LinkedIn account disconnected successfully'
+      });
+    } else {
+      return NextResponse.json(
+        { error: 'Session not found' },
+        { status: 404 }
+      );
+    }
+
+  } catch (error) {
+    console.error('Error deleting LinkedIn account:', error);
+    return NextResponse.json(
+      { 
+        error: 'DELETE_ERROR',
+        message: 'Failed to delete LinkedIn account'
+      },
+      { status: 500 }
+    );
+  }
+}

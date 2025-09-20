@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
+import Image from "next/image";
 import Sidebar from "@/components/layout/Sidebar";
 import TopBar from "@/components/layout/TopBar";
 import {
@@ -14,14 +15,10 @@ import {
   Trash2,
   Edit,
   Eye,
-  CheckCircle,
-  XCircle,
-  AlertCircle,
   Users,
   MessageSquare,
   X,
   Shield,
-  Lock,
 } from "lucide-react";
 
 // Mock data for LinkedIn accounts
@@ -42,71 +39,48 @@ const mockLinkedInAccounts = [
   // Add more mock accounts as needed
 ];
 
-const statusConfig = {
-  healthy: {
-    label: "Healthy",
-    color: "success",
-    icon: CheckCircle,
-    bgColor: "bg-success/10 border-success/20",
-    textColor: "text-success",
-  },
-  warning: {
-    label: "Warning",
-    color: "warning", 
-    icon: AlertCircle,
-    bgColor: "bg-warning/10 border-warning/20",
-    textColor: "text-warning",
-  },
-  error: {
-    label: "Error",
-    color: "error",
-    icon: XCircle,
-    bgColor: "bg-error/10 border-error/20", 
-    textColor: "text-error",
-  },
-};
-
-const subscriptionConfig = {
-  trial: {
-    label: "Trial",
-    color: "warning",
-    bgColor: "bg-warning/10 border-warning/20",
-    textColor: "text-warning",
-  },
-  premium: {
-    label: "Premium", 
-    color: "success",
-    bgColor: "bg-success/10 border-success/20",
-    textColor: "text-success",
-  },
-  basic: {
-    label: "Basic",
-    color: "info",
-    bgColor: "bg-info/10 border-info/20", 
-    textColor: "text-info",
-  },
-};
 
 export default function AccountsPage() {
   const { data: session, status } = useSession();
   const router = useRouter();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [accounts] = useState(mockLinkedInAccounts);
+  const [accounts, setAccounts] = useState(mockLinkedInAccounts);
   const [selectedAccounts, setSelectedAccounts] = useState([]);
   const [currentPage, setCurrentPage] = useState(1);
   const accountsPerPage = 10;
   const [showLinkedInModal, setShowLinkedInModal] = useState(false);
-  const [linkedInForm, setLinkedInForm] = useState({
-    email: '',
-    password: ''
-  });
   const [isConnecting, setIsConnecting] = useState(false);
+  const [isLoadingAccounts, setIsLoadingAccounts] = useState(true);
+
+  // Fetch LinkedIn accounts
+  const fetchLinkedInAccounts = async () => {
+    try {
+      setIsLoadingAccounts(true);
+      const response = await fetch('/api/linkedin/accounts');
+      const data = await response.json();
+      
+      if (response.ok) {
+        setAccounts(data.accounts);
+      } else {
+        console.error('Error fetching accounts:', data.message);
+        // Keep mock data as fallback
+      }
+    } catch (error) {
+      console.error('Error fetching LinkedIn accounts:', error);
+      // Keep mock data as fallback
+    } finally {
+      setIsLoadingAccounts(false);
+    }
+  };
 
   // Redirect if not authenticated
   useEffect(() => {
     if (status === "loading") return;
     if (!session) {
       router.push("/");
+    } else {
+      // Fetch accounts when user is authenticated
+      fetchLinkedInAccounts();
     }
   }, [session, status, router]);
 
@@ -132,25 +106,46 @@ export default function AccountsPage() {
     }
   };
 
-  const handleLinkedInConnect = async (e) => {
-    e.preventDefault();
+  const handleLinkedInConnect = async () => {
     setIsConnecting(true);
     
     try {
-      // Simulate API call delay
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
-      // Here you would make the actual API call to connect the LinkedIn account
-      console.log('Connecting LinkedIn account:', linkedInForm);
-      
-      // Reset form and close modal
-      setLinkedInForm({ email: '', password: '' });
-      setShowLinkedInModal(false);
-      
-      // You might want to refresh the accounts list here
+      const response = await fetch('/api/linkedin/connect', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        // Success - show success message
+        console.log('LinkedIn account connected successfully:', data);
+        
+        // Close modal
+        setShowLinkedInModal(false);
+        
+        // Refresh the accounts list
+        await fetchLinkedInAccounts();
+        
+        // Show success message
+        alert('LinkedIn account connected successfully!');
+        
+      } else {
+        // Handle different error types
+        if (data.error === 'USER_CANCELLED') {
+          alert('LinkedIn login was cancelled. Please try again.');
+        } else if (data.error === 'LOGIN_FAILED') {
+          alert('LinkedIn login failed. Please try again.');
+        } else {
+          alert(`Error: ${data.message || 'Failed to connect LinkedIn account'}`);
+        }
+      }
       
     } catch (error) {
       console.error('Error connecting LinkedIn account:', error);
+      alert('Network error. Please try again.');
     } finally {
       setIsConnecting(false);
     }
@@ -158,8 +153,38 @@ export default function AccountsPage() {
 
   const handleCloseModal = () => {
     setShowLinkedInModal(false);
-    setLinkedInForm({ email: '', password: '' });
     setIsConnecting(false);
+  };
+
+  const handleToggleActive = async (accountId, isActive) => {
+    try {
+      const response = await fetch('/api/linkedin/accounts/toggle-active', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          accountId,
+          isActive
+        })
+      });
+
+      if (response.ok) {
+        // Update local state
+        setAccounts(prevAccounts => 
+          prevAccounts.map(account => ({
+            ...account,
+            isActive: account.id === accountId ? isActive : false
+          }))
+        );
+      } else {
+        const data = await response.json();
+        alert(`Error: ${data.message || 'Failed to update account status'}`);
+      }
+    } catch (error) {
+      console.error('Error toggling account status:', error);
+      alert('Network error. Please try again.');
+    }
   };
 
 
@@ -255,10 +280,10 @@ export default function AccountsPage() {
           </div>
 
           {/* Accounts Table */}
-          <div className="card bg-base-100 border border-base-300 overflow-hidden">
+          <div className="card bg-base-100 border border-base-300 overflow-hidden shadow-sm">
             {/* Table Header */}
             <div className="bg-base-200 px-6 py-4 border-b border-base-300">
-              <div className="grid grid-cols-12 gap-4 items-center text-sm font-medium text-base-content/70 uppercase tracking-wider">
+              <div className="grid grid-cols-12 gap-6 items-center text-sm font-medium text-base-content/70 uppercase tracking-wider">
                 <div className="col-span-1">
                   <input
                     type="checkbox"
@@ -268,23 +293,24 @@ export default function AccountsPage() {
                   />
                 </div>
                 <div className="col-span-3">Account Info</div>
-                <div className="col-span-2">Status</div>
-                <div className="col-span-2">Daily Limits</div>
-                <div className="col-span-2">Tags</div>
-                <div className="col-span-2">Action</div>
+                <div className="col-span-2">Active</div>
+                <div className="col-span-3">Daily Limits</div>
+                <div className="col-span-3">Action</div>
               </div>
             </div>
 
             {/* Table Body */}
             <div className="divide-y divide-base-300">
-              {paginatedAccounts.map((account) => {
-                const statusInfo = statusConfig[account.status];
-                const subInfo = subscriptionConfig[account.subscription];
-                const StatusIcon = statusInfo.icon;
+              {isLoadingAccounts ? (
+                <div className="py-12 text-center">
+                  <div className="loading loading-spinner loading-lg text-primary"></div>
+                  <p className="mt-4 text-base-content/60">Loading LinkedIn accounts...</p>
+                </div>
+              ) : paginatedAccounts.map((account) => {
                 
                 return (
-                  <div key={account.id} className="px-6 py-4 hover:bg-base-50 transition-colors">
-                    <div className="grid grid-cols-12 gap-4 items-center">
+                  <div key={account.id} className="px-6 py-5 hover:bg-base-50 transition-colors border-b border-base-200 last:border-b-0">
+                    <div className="grid grid-cols-12 gap-6 items-center">
                       {/* Selection */}
                       <div className="col-span-1">
                         <input
@@ -299,11 +325,33 @@ export default function AccountsPage() {
                       <div className="col-span-3">
                         <div className="flex items-center gap-3">
                           <div className="relative">
-                            <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-blue-600 rounded-full flex items-center justify-center">
-                              <span className="text-white font-medium text-sm">
-                                {account.name.split(' ').map(n => n[0]).join('')}
-                              </span>
-                            </div>
+                            {account.profileImageUrl ? (
+                              <>
+                                <Image 
+                                  src={account.profileImageUrl} 
+                                  alt={account.name}
+                                  width={40}
+                                  height={40}
+                                  className="w-10 h-10 rounded-full object-cover"
+                                  onError={(e) => {
+                                    // Hide image and show fallback
+                                    e.target.style.display = 'none';
+                                    e.target.nextSibling.style.display = 'flex';
+                                  }}
+                                />
+                                <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-blue-600 rounded-full flex items-center justify-center absolute inset-0" style={{display: 'none'}}>
+                                  <span className="text-white font-medium text-sm">
+                                    {account.name.split(' ').map(n => n[0]).join('')}
+                                  </span>
+                                </div>
+                              </>
+                            ) : (
+                              <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-blue-600 rounded-full flex items-center justify-center">
+                                <span className="text-white font-medium text-sm">
+                                  {account.name.split(' ').map(n => n[0]).join('')}
+                                </span>
+                              </div>
+                            )}
                             <div className={`absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center ${
                               account.salesNavActive ? 'bg-success' : 'bg-base-300'
                             }`}>
@@ -313,9 +361,6 @@ export default function AccountsPage() {
                           
                           <div className="min-w-0">
                             <div className="font-medium text-base-content truncate">
-                              {account.email}
-                            </div>
-                            <div className="text-sm text-base-content/60 truncate">
                               {account.name}
                             </div>
                             <div className="flex items-center gap-2 mt-1">
@@ -327,23 +372,22 @@ export default function AccountsPage() {
                         </div>
                       </div>
 
-                       {/* Status */}
+                       {/* Active Status */}
                        <div className="col-span-2">
-                         <div className="space-y-2">
-                           <div className="flex items-center gap-2">
-                             <div className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium border ${statusInfo.bgColor} ${statusInfo.textColor}`}>
-                               <StatusIcon className="h-3 w-3" />
-                               Account - {statusInfo.label}
-                             </div>
-                           </div>
-                           <div className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium border ${subInfo.bgColor} ${subInfo.textColor}`}>
-                             Subscription - {subInfo.label}
-                           </div>
-                         </div>
+                      
+                           <input
+                             type="checkbox"
+                             className="toggle toggle-primary toggle-lg"
+                             checked={account.isActive || false}
+                             onChange={(e) => handleToggleActive(account.id, e.target.checked)}
+                             disabled={isLoadingAccounts}
+                           />
+                         
+                   
                        </div>
 
                       {/* Daily Limits */}
-                      <div className="col-span-2">
+                      <div className="col-span-3">
                         <div className="space-y-1 text-sm">
                           <div className="flex items-center justify-between">
                             <span className="text-base-content/60">Connection invites</span>
@@ -360,16 +404,8 @@ export default function AccountsPage() {
                         </button>
                       </div>
 
-                      {/* Tags */}
-                      <div className="col-span-2">
-                        <button className="btn btn-outline btn-sm gap-2">
-                          <Plus className="h-3 w-3" />
-                          New Tag
-                        </button>
-                      </div>
-
                       {/* Actions */}
-                      <div className="col-span-2">
+                      <div className="col-span-3">
                         <div className="flex items-center gap-1">
                           <button className="btn btn-ghost btn-sm btn-circle" title="View Details">
                             <Eye className="h-4 w-4" />
@@ -508,95 +544,63 @@ export default function AccountsPage() {
                 <div className="flex items-start gap-3">
                   <Shield className="h-5 w-5 text-success flex-shrink-0 mt-0.5" />
                   <div>
-                    <h4 className="text-sm font-medium text-success mb-1">Your Data is Secure</h4>
+                    <h4 className="text-sm font-medium text-success mb-1">Secure Login</h4>
                     <p className="text-xs text-success/80">
-                      Your credentials are encrypted and stored securely. We use industry-standard security measures to protect your information.
+                      You&apos;ll be redirected to LinkedIn&apos;s official login page. Your credentials are never stored in our system.
                     </p>
                   </div>
                 </div>
               </div>
 
-              <form onSubmit={handleLinkedInConnect} className="space-y-4">
-                {/* Email Field */}
-                <div>
-                  <label className="label">
-                    <span className="label-text text-sm font-medium">LinkedIn Email</span>
-                  </label>
-                  <input
-                    type="email"
-                    placeholder="Enter your LinkedIn email"
-                    className="input input-bordered w-full"
-                    value={linkedInForm.email}
-                    onChange={(e) => setLinkedInForm(prev => ({
-                      ...prev,
-                      email: e.target.value
-                    }))}
-                    required
-                    disabled={isConnecting}
-                  />
-                </div>
-
-                {/* Password Field */}
-                <div>
-                  <label className="label">
-                    <span className="label-text text-sm font-medium">LinkedIn Password</span>
-                  </label>
-                  <div className="relative">
-                    <input
-                      type="password"
-                      placeholder="Enter your LinkedIn password"
-                      className="input input-bordered w-full pr-10"
-                      value={linkedInForm.password}
-                      onChange={(e) => setLinkedInForm(prev => ({
-                        ...prev,
-                        password: e.target.value
-                      }))}
-                      required
-                      disabled={isConnecting}
-                    />
-                    <Lock className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-base-content/40" />
+              {/* Instructions */}
+              <div className="bg-info/10 border border-info/20 rounded-lg p-4 mb-6">
+                <div className="flex items-start gap-3">
+                  <div className="w-5 h-5 bg-blue-600 rounded flex items-center justify-center flex-shrink-0 mt-0.5">
+                    <span className="text-white text-xs font-bold">in</span>
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-medium text-info mb-1">How it works</h4>
+                    <p className="text-xs text-info/80">
+                      1. Click &quot;Connect LinkedIn&quot; below<br/>
+                      2. A browser window will open with LinkedIn&apos;s login page<br/>
+                      3. Log in with your LinkedIn credentials<br/>
+                      4. We&apos;ll capture your session for automation
+                    </p>
                   </div>
                 </div>
+              </div>
 
-                {/* Additional Security Info */}
-                <div className="bg-info/10 border border-info/20 rounded-lg p-3">
-                  <div className="flex items-center gap-2 text-xs text-info">
-                    <Lock className="h-3 w-3 flex-shrink-0" />
-                    <span>End-to-end encrypted • Never shared with third parties</span>
-                  </div>
-                </div>
-
-                {/* Action Buttons */}
-                <div className="flex gap-3 pt-4">
-                  <button
-                    type="button"
-                    onClick={handleCloseModal}
-                    className="btn btn-ghost btn-sm flex-1"
-                    disabled={isConnecting}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    className="btn btn-primary btn-sm flex-1 gap-2"
-                    disabled={isConnecting || !linkedInForm.email || !linkedInForm.password}
-                  >
-                    {isConnecting ? (
-                      <>
-                        <span className="loading loading-spinner loading-xs"></span>
-                        <span className="text-xs">Connecting...</span>
-                      </>
-                    ) : (
-                      <>
-                        <div className="w-3 h-3 bg-blue-600 rounded flex items-center justify-center">
-                          <span className="text-white text-xs font-bold">in</span>
-                        </div>
-                        <span className="text-xs">Connect Account</span>
-                      </>
-                    )}
-                  </button>
-                </div>
-              </form>
+              {/* Action Buttons */}
+              <div className="flex gap-3 pt-4">
+                <button
+                  type="button"
+                  onClick={handleCloseModal}
+                  className="btn btn-ghost btn-sm flex-1"
+                  disabled={isConnecting}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleLinkedInConnect}
+                  className="btn btn-primary btn-sm flex-1 gap-2"
+                  disabled={isConnecting}
+                >
+                  {isConnecting ? (
+                    <>
+                      <span className="loading loading-spinner loading-xs"></span>
+                      <span className="text-xs">Connecting...</span>
+                    </>
+                  ) : (
+                    <>
+                      <div className="w-3 h-3 bg-blue-600 rounded flex items-center justify-center">
+                        <span className="text-white text-xs font-bold">in</span>
+                      </div>
+                      <span className="text-xs">Connect LinkedIn</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
           </div>
         </div>
