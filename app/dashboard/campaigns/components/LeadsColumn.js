@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, memo } from "react";
-import toast from "react-hot-toast";
+import { toast } from "react-hot-toast";
 import {
   Plus,
   Upload,
@@ -219,7 +219,7 @@ const LeadsColumn = memo(function LeadsColumn({
     if (lead.status === "processing") return "Processing...";
 
     // Extract name from LinkedIn URL
-    const urlMatch = lead.url.match(/linkedin\.com\/in\/([^\/]+)/);
+    const urlMatch = new RegExp("linkedin\\.com/in/([^/]+)").exec(lead.url);
     if (urlMatch) {
       const username = urlMatch[1];
       return username
