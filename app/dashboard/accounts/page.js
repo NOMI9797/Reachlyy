@@ -31,6 +31,7 @@ export default function AccountsPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const accountsPerPage = 10;
   const [showLinkedInModal, setShowLinkedInModal] = useState(false);
+  const [linkedInCredentials, setLinkedInCredentials] = useState({ email: '', password: '' });
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' });
 
   // Use React Query hooks for LinkedIn accounts
@@ -79,22 +80,47 @@ export default function AccountsPage() {
   };
 
   const handleLinkedInConnect = async () => {
+    console.log('🔗 handleLinkedInConnect called');
+    
+    // Prevent multiple simultaneous connection attempts
+    if (isConnecting) {
+      console.log('⚠️ Connection already in progress, ignoring duplicate call');
+      return;
+    }
+
+    // Validate credentials
+    if (!linkedInCredentials.email || !linkedInCredentials.password) {
+      showToast('Please enter both email and password', 'error');
+      return;
+    }
+
+    console.log('🚀 Starting LinkedIn connection with email:', linkedInCredentials.email);
+
     try {
-      await connectAccount();
+      await connectAccount(linkedInCredentials.email, linkedInCredentials.password);
       
-      // Success - close modal
+      // Success - close modal and reset form
       setShowLinkedInModal(false);
+      setLinkedInCredentials({ email: '', password: '' });
       
       // Show success message
       showToast('LinkedIn account connected successfully!', 'success', 3000);
       
     } catch (error) {
+      console.log('❌ Connection error caught in frontend:', error);
+      
       // Handle different error types
       let errorMessage = 'Failed to connect LinkedIn account';
-      if (error.message.includes('USER_CANCELLED')) {
-        errorMessage = 'LinkedIn login was cancelled. Please try again.';
+      if (error.message.includes('CONNECTION_IN_PROGRESS')) {
+        errorMessage = 'A LinkedIn connection is already in progress. Please wait for it to complete.';
+      } else if (error.message.includes('INVALID_CREDENTIALS')) {
+        errorMessage = 'Invalid email or password. Please check your LinkedIn credentials.';
+      } else if (error.message.includes('2FA_NOT_SUPPORTED')) {
+        errorMessage = 'This account has Two-Factor Authentication (2FA) enabled. Please disable 2FA in your LinkedIn security settings and try again.';
+      } else if (error.message.includes('LOGIN_TIMEOUT')) {
+        errorMessage = 'Login process timed out. Please try again.';
       } else if (error.message.includes('LOGIN_FAILED')) {
-        errorMessage = 'LinkedIn login failed. Please try again.';
+        errorMessage = 'LinkedIn login failed. Please check your credentials and try again.';
       } else {
         errorMessage = error.message || errorMessage;
       }
@@ -105,6 +131,7 @@ export default function AccountsPage() {
 
   const handleCloseModal = () => {
     setShowLinkedInModal(false);
+    setLinkedInCredentials({ email: '', password: '' });
   };
 
   const handleToggleActive = async (accountId, isActive) => {
@@ -493,14 +520,62 @@ export default function AccountsPage() {
 
             {/* Modal Body */}
             <div className="p-6">
+              {/* 2FA Warning */}
+              <div className="bg-warning/10 border border-warning/20 rounded-lg p-4 mb-6">
+                <div className="flex items-start gap-3">
+                  <Shield className="h-5 w-5 text-warning flex-shrink-0 mt-0.5" />
+                  <div>
+                    <h4 className="text-sm font-medium text-warning mb-1">2FA Not Supported</h4>
+                    <p className="text-xs text-warning/80">
+                      Accounts with Two-Factor Authentication (2FA) are not supported. Please disable 2FA on your LinkedIn account before connecting.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Credential Form */}
+              <div className="space-y-4 mb-6">
+                <div>
+                  <label htmlFor="linkedin-email" className="block text-sm font-medium text-base-content mb-2">
+                    LinkedIn Email
+                  </label>
+                  <input
+                    id="linkedin-email"
+                    type="email"
+                    value={linkedInCredentials.email}
+                    onChange={(e) => setLinkedInCredentials(prev => ({ ...prev, email: e.target.value }))}
+                    placeholder="Enter your LinkedIn email"
+                    className="input input-bordered w-full"
+                    disabled={isConnecting}
+                    required
+                  />
+                </div>
+                
+                <div>
+                  <label htmlFor="linkedin-password" className="block text-sm font-medium text-base-content mb-2">
+                    LinkedIn Password
+                  </label>
+                  <input
+                    id="linkedin-password"
+                    type="password"
+                    value={linkedInCredentials.password}
+                    onChange={(e) => setLinkedInCredentials(prev => ({ ...prev, password: e.target.value }))}
+                    placeholder="Enter your LinkedIn password"
+                    className="input input-bordered w-full"
+                    disabled={isConnecting}
+                    required
+                  />
+                </div>
+              </div>
+
               {/* Security Notice */}
               <div className="bg-success/10 border border-success/20 rounded-lg p-4 mb-6">
                 <div className="flex items-start gap-3">
                   <Shield className="h-5 w-5 text-success flex-shrink-0 mt-0.5" />
                   <div>
-                    <h4 className="text-sm font-medium text-success mb-1">Secure Login</h4>
+                    <h4 className="text-sm font-medium text-success mb-1">Secure & Automated</h4>
                     <p className="text-xs text-success/80">
-                      You&apos;ll be redirected to LinkedIn&apos;s official login page. Your credentials are never stored in our system.
+                      We use automated browser login to connect your account. Your credentials are used only for login and are not stored permanently.
                     </p>
                   </div>
                 </div>
@@ -515,10 +590,10 @@ export default function AccountsPage() {
                   <div>
                     <h4 className="text-sm font-medium text-info mb-1">How it works</h4>
                     <p className="text-xs text-info/80">
-                      1. Click &quot;Connect LinkedIn&quot; below<br/>
-                      2. A browser window will open with LinkedIn&apos;s login page<br/>
-                      3. Log in with your LinkedIn credentials<br/>
-                      4. We&apos;ll capture your session for automation
+                      1. Enter your LinkedIn credentials above<br/>
+                      2. Click &quot;Connect LinkedIn&quot; below<br/>
+                      3. We&apos;ll automatically log in to your account<br/>
+                      4. Your session will be captured for automation
                     </p>
                   </div>
                 </div>

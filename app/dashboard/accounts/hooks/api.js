@@ -18,12 +18,13 @@ export const linkedinAccountApi = {
   },
 
   // Connect a new LinkedIn account
-  connectAccount: async () => {
+  connectAccount: async (email, password) => {
     const response = await fetch("/api/linkedin/connect", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
+      body: JSON.stringify({ email, password }),
     });
 
     const result = await response.json();
