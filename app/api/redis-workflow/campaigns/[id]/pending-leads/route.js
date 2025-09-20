@@ -34,7 +34,7 @@ export async function GET(request, { params }) {
     const leadsData = await redis.hgetall(`campaign:${campaignId}:leads`);
     
     if (!leadsData || Object.keys(leadsData).length === 0) {
-      console.log(`📋 No leads found in Redis for campaign ${campaignId}`);
+      // No leads found in Redis cache
       return NextResponse.json({
         success: true,
         data: {
@@ -56,21 +56,30 @@ export async function GET(request, { params }) {
     // Create a set of lead IDs that already have messages
     const leadsWithMessages = new Set(existingMessages.map(msg => msg.leadId));
 
-    // Filter out leads that already have messages
-    const leadsReadyForMessages = leads.filter(lead => !leadsWithMessages.has(lead.id));
+    // Filter out leads that already have messages and exclude error leads
+    const leadsReadyForMessages = leads.filter(lead => 
+      !leadsWithMessages.has(lead.id) && 
+      lead.status === 'completed' && 
+      lead.status !== 'error'
+    );
 
-    console.log(`📋 Found ${leads.length} total leads, ${leadsReadyForMessages.length} ready for messages (${leads.length - leadsReadyForMessages.length} already have messages)`);
+    const errorLeads = leads.filter(lead => lead.status === 'error').length;
+    const leadsWithMessagesCount = leads.filter(lead => leadsWithMessages.has(lead.id)).length;
+    const completedLeads = leads.filter(lead => lead.status === 'completed').length;
+    // Filtered leads for message generation
 
     return NextResponse.json({
       success: true,
-      data: {
-        campaignId,
-        leadsReadyForMessages,
-        count: leadsReadyForMessages.length,
-        totalLeads: leads.length,
-        leadsWithMessages: leads.length - leadsReadyForMessages.length,
-        workflow: "redis-first"
-      }
+        data: {
+          campaignId,
+          leadsReadyForMessages,
+          count: leadsReadyForMessages.length,
+          totalLeads: leads.length,
+          leadsWithMessages: leadsWithMessagesCount,
+          errorLeads: errorLeads,
+          completedLeads: completedLeads,
+          workflow: "redis-first"
+        }
     });
 
   } catch (error) {

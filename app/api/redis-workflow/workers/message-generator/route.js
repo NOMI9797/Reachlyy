@@ -23,146 +23,178 @@ export async function POST(request) {
     const streamManager = new RedisStreamManager();
     const redis = getRedisClient();
     
-    const LEADS_STREAM_NAME = 'leads:message-generation';
     const CONSUMER_GROUP_NAME = 'message-generators';
     const CONSUMER_NAME = process.env.WORKER_ID || 'default-worker';
 
-    await streamManager.createConsumerGroup(LEADS_STREAM_NAME, CONSUMER_GROUP_NAME);
-
     const { batchSize = 5, consumerName = CONSUMER_NAME } = await request.json();
-    const streamResult = await streamManager.readFromStream(
-      LEADS_STREAM_NAME,
-      CONSUMER_GROUP_NAME,
-      consumerName,
-      batchSize
-    );
 
-    if (!streamResult || streamResult.length === 0) {
+    // Discover all campaign streams
+    const campaignStreams = await redis.keys('campaign:*:message-generation');
+    // Found campaign streams to process
+
+    if (campaignStreams.length === 0) {
       return NextResponse.json({
         success: true,
-        message: "No messages to process",
+        message: "No campaign streams found",
         data: {
           processed: 0,
           failed: 0,
           total: 0,
           results: [],
           consumerName,
-          workflow: "redis-first"
+          workflow: "redis-first-campaign-specific"
         }
       });
     }
 
-    const consumedMessages = streamResult[0][1]; // Get messages from first stream
-    console.log(`🤖 Processing ${consumedMessages.length} messages`);
+    // Process each campaign stream
+    let totalProcessed = 0;
+    let totalFailed = 0;
+    const allResults = [];
 
-    let processedCount = 0;
-    let failedCount = 0;
-    const results = [];
-    const messagesToInsert = [];
-    const leadIdsToUpdate = [];
-
-    // Process each message
-    for (const [messageId, fields] of consumedMessages) {
+    for (const streamName of campaignStreams) {
       try {
-        // Convert Redis stream fields array to object
-        const leadData = {};
-        for (let i = 0; i < fields.length; i += 2) {
-          leadData[fields[i]] = fields[i + 1];
+        await streamManager.createConsumerGroup(streamName, CONSUMER_GROUP_NAME);
+        
+        const streamResult = await streamManager.readFromStream(
+          streamName,
+          CONSUMER_GROUP_NAME,
+          consumerName,
+          batchSize
+        );
+
+        if (!streamResult || streamResult.length === 0) {
+          // No messages in this stream
+          continue; // Move to next stream
         }
 
-        console.log(`🔄 Processing lead ${leadData.lead_id} from message ${messageId}`);
+        const consumedMessages = streamResult[0][1]; // Get messages from first stream
+        // Processing messages from stream
 
-        // Generate AI message
-        const aiMessage = await generatePersonalizedMessage({
-          leadName: leadData.name || "LinkedIn User",
-          leadTitle: leadData.title || "",
-          leadCompany: leadData.company || "",
-          posts: [],
-          customPrompt: leadData.custom_prompt || "",
-          model: leadData.model || "llama-3.1-8b-instant"
-        });
+        let processedCount = 0;
+        let failedCount = 0;
+        const results = [];
+        const messagesToInsert = [];
+        const leadIdsToUpdate = [];
 
-        // Prepare message for bulk insert
-        messagesToInsert.push({
-          leadId: leadData.lead_id,
-          campaignId: leadData.campaign_id,
-          content: aiMessage,
-          model: leadData.model || "llama-3.1-8b-instant",
-          customPrompt: leadData.custom_prompt || "",
-          status: 'draft'
-        });
+        // Process each message
+        for (const [messageId, fields] of consumedMessages) {
+          try {
+            // Convert Redis stream fields array to object
+            const leadData = {};
+            for (let i = 0; i < fields.length; i += 2) {
+              leadData[fields[i]] = fields[i + 1];
+            }
 
-        leadIdsToUpdate.push(leadData.lead_id);
+            // Processing lead for message generation
 
-        // Acknowledge message in Redis
-        await streamManager.acknowledgeMessage(LEADS_STREAM_NAME, CONSUMER_GROUP_NAME, messageId);
+            // Generate AI message
+            const aiMessage = await generatePersonalizedMessage({
+              leadName: leadData.name || "LinkedIn User",
+              leadTitle: leadData.title || "",
+              leadCompany: leadData.company || "",
+              posts: [],
+              customPrompt: leadData.custom_prompt || "",
+              model: leadData.model || "llama-3.1-8b-instant"
+            });
 
-        console.log(`✅ Generated message for lead ${leadData.lead_id}: ${messagesToInsert[messagesToInsert.length - 1].id || 'pending'}`);
+            // Prepare message for bulk insert
+            messagesToInsert.push({
+              leadId: leadData.lead_id,
+              campaignId: leadData.campaign_id,
+              content: aiMessage,
+              model: leadData.model || "llama-3.1-8b-instant",
+              customPrompt: leadData.custom_prompt || "",
+              status: 'draft'
+            });
 
-        results.push({
-          success: true,
-          leadId: leadData.lead_id,
-          campaignId: leadData.campaign_id,
-          redisMessageId: messageId
-        });
+            leadIdsToUpdate.push(leadData.lead_id);
 
-        processedCount++;
+            // Acknowledge message in Redis
+            await streamManager.acknowledgeMessage(streamName, CONSUMER_GROUP_NAME, messageId);
 
-      } catch (error) {
-        console.error(`❌ Failed to process message ${messageId}:`, error);
-        failedCount++;
-        results.push({
-          success: false,
-          messageId,
-          error: error.message
-        });
-      }
-    }
+            // Message generated successfully
 
-    // Bulk insert messages to database
-    if (messagesToInsert.length > 0) {
-      try {
-        await db.insert(messages).values(messagesToInsert);
-        console.log(`✅ Generated ${messagesToInsert.length} messages`);
-      } catch (error) {
-        console.error(`❌ Redis-First: Bulk insert failed:`, error);
-      }
-    }
+            results.push({
+              success: true,
+              leadId: leadData.lead_id,
+              campaignId: leadData.campaign_id,
+              redisMessageId: messageId,
+              streamName: streamName
+            });
 
-    // Update Redis cache for affected campaigns
-    if (processedCount > 0) {
-      const campaigns = [...new Set(results.map(r => r.campaignId))];
-      for (const campaignId of campaigns) {
-        try {
-          // Keep all leads in Redis cache (don't remove processed leads)
-          // This ensures consistency with existing campaigns
-          console.log(`✅ WORKER: Keeping ${leadIdsToUpdate.length} processed leads in Redis cache for campaign ${campaignId}`);
-          
-          // Update campaign data timestamp only
-          const currentData = await redis.hgetall(`campaign:${campaignId}:data`);
-          if (currentData && currentData.leadsCount) {
-            await redis.hset(`campaign:${campaignId}:data`, 'lastUpdated', Date.now());
-            console.log(`✅ WORKER: Updated lastUpdated timestamp for campaign ${campaignId}`);
+            processedCount++;
+
+          } catch (error) {
+            console.error(`❌ Failed to process message ${messageId}:`, error);
+            failedCount++;
+            results.push({
+              success: false,
+              messageId,
+              error: error.message,
+              streamName: streamName
+            });
           }
-          
-        } catch (error) {
-          console.log(`⚠️ Cache update error for campaign ${campaignId}:`, error.message);
         }
+
+        // Bulk insert messages to database for this stream
+        if (messagesToInsert.length > 0) {
+          try {
+            await db.insert(messages).values(messagesToInsert);
+            // Messages inserted to database
+          } catch (error) {
+            console.error(`❌ Redis-First: Bulk insert failed for ${streamName}:`, error);
+          }
+        }
+
+        // Update Redis cache for affected campaigns
+        if (processedCount > 0) {
+          const campaigns = [...new Set(results.map(r => r.campaignId))];
+          for (const campaignId of campaigns) {
+            try {
+              // Keep all leads in Redis cache (don't remove processed leads)
+              // This ensures consistency with existing campaigns
+              // Updated Redis cache for campaign
+              
+              // Update campaign data timestamp only
+              const currentData = await redis.hgetall(`campaign:${campaignId}:data`);
+              if (currentData && currentData.leadsCount) {
+                await redis.hset(`campaign:${campaignId}:data`, 'lastUpdated', Date.now());
+                // Updated timestamp for campaign
+              }
+              
+            } catch (error) {
+              console.log(`⚠️ Cache update error for campaign ${campaignId}:`, error.message);
+            }
+          }
+        }
+
+        // Stream processing completed
+        
+        // Accumulate totals
+        totalProcessed += processedCount;
+        totalFailed += failedCount;
+        allResults.push(...results);
+
+      } catch (error) {
+        console.error(`❌ Error processing stream ${streamName}:`, error);
+        totalFailed++;
       }
     }
 
-    console.log(`🎉 Processed ${processedCount} messages, ${failedCount} failed`);
+    // All streams processed
 
     return NextResponse.json({
       success: true,
-      message: `Processed ${processedCount} messages successfully`,
+      message: `Processed ${totalProcessed} messages successfully across ${campaignStreams.length} campaign streams`,
       data: {
-        processed: processedCount,
-        failed: failedCount,
-        total: consumedMessages.length,
-        results: results,
+        processed: totalProcessed,
+        failed: totalFailed,
+        total: totalProcessed + totalFailed,
+        results: allResults,
         consumerName,
-        workflow: "redis-first"
+        workflow: "redis-first-campaign-specific",
+        streamsProcessed: campaignStreams.length
       }
     });
 

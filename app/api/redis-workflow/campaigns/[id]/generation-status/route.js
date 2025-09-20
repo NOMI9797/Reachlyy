@@ -26,7 +26,7 @@ export async function GET(request, { params }) {
       );
     }
 
-    console.log(`📊 Redis Workflow: Getting generation status for campaign ${campaignId}`);
+    // Getting generation status
 
     const redis = getRedisClient();
     
@@ -42,7 +42,7 @@ export async function GET(request, { params }) {
           campaignId,
           leads: { pending: 0, completed: 0, error: 0, total: 0 },
           messages: { total: 0 },
-          redis: { queueLength: 0, streamName: "leads:message-generation", groupName: "message-generators" },
+          redis: { queueLength: 0, streamName: `campaign:${campaignId}:message-generation`, groupName: "message-generators" },
           workflow: "redis-first",
           timestamp: Date.now()
         }
@@ -52,13 +52,14 @@ export async function GET(request, { params }) {
     const leads = Object.values(leadsData).map(leadStr => JSON.parse(leadStr));
     const leadsNeedingMessages = leads.filter(lead => 
       lead.status === 'completed' && 
+      lead.status !== 'error' &&
       (!lead.hasMessage || lead.hasMessage === false)
     );
 
-    console.log(`📋 Found ${leadsNeedingMessages.length} leads ready for messages`);
+    // Found leads ready for messages
 
     // Get Redis stream queue length first
-    const streamName = "leads:message-generation";
+    const streamName = `campaign:${campaignId}:message-generation`;
     const groupName = "message-generators";
     
     let streamLength = 0;
@@ -108,19 +109,19 @@ export async function GET(request, { params }) {
               console.log(`⚠️ Auto-queue background call failed: ${error.message}`);
             });
             
-            console.log(`🚀 AUTO-QUEUE: Triggered background auto-queue for ${leadsNeedingMessages.length} leads (queue was empty)`);
+            // Auto-queue triggered successfully
           } catch (error) {
             console.log(`⚠️ Auto-queue trigger failed: ${error.message}`);
           }
         } else {
           const timeLeft = Math.ceil((cooldownPeriod - (now - parseInt(lastAttempt))) / 1000);
-          console.log(`⏭️ AUTO-QUEUE: Skipped auto-queue - cooldown active (${timeLeft}s remaining)`);
+          // Auto-queue skipped due to cooldown
         }
       } else {
-        console.log(`⏭️ AUTO-QUEUE: Skipped auto-queue - queue already has ${streamLength} items`);
+        // Auto-queue skipped - queue already has items
       }
     } else {
-      console.log(`⏭️ AUTO-QUEUE: Skipped auto-queue - no leads need messages`);
+      // Auto-queue skipped - no leads need messages
     }
 
     const leadsCount = Object.keys(leadsData).length;
@@ -138,14 +139,14 @@ export async function GET(request, { params }) {
       },
       redis: {
         queueLength: streamLength,
-        streamName: "leads:message-generation",
+        streamName: streamName,
         groupName: "message-generators"
       },
       workflow: "redis-first-auto-queue",
       timestamp: Date.now()
     };
 
-    console.log(`📊 Status: ${leadsCount} leads, ${streamLength} in queue`);
+    // Status updated
 
     return NextResponse.json({
       success: true,

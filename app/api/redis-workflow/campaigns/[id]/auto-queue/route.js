@@ -22,7 +22,7 @@ export async function POST(request, { params }) {
     const redis = getRedisClient();
     const streamManager = new RedisStreamManager();
 
-    const STREAM_NAME = "leads:message-generation";
+    const STREAM_NAME = `campaign:${campaignId}:message-generation`;
     const GROUP_NAME = "message-generators";
 
     // Ensure consumer group exists (creates stream if missing)
@@ -40,9 +40,11 @@ export async function POST(request, { params }) {
 
     const allLeads = Object.values(leadsData).map((s) => JSON.parse(s));
 
-    // Filter leads that are completed and do not yet have a message flag
+    // Filter leads that are completed and do not yet have a message flag (exclude error leads)
     const leadsNeedingMessages = allLeads.filter((lead) =>
-      lead.status === "completed" && (!lead.hasMessage || lead.hasMessage === false)
+      lead.status === "completed" && 
+      lead.status !== "error" &&
+      (!lead.hasMessage || lead.hasMessage === false)
     );
 
     if (leadsNeedingMessages.length === 0) {

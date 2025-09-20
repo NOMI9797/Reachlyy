@@ -29,7 +29,7 @@ export async function POST(request, { params }) {
       );
     }
 
-    console.log(`🔄 Redis Workflow: Queueing completed leads for message generation for campaign ${campaignId}`);
+    // Queueing leads for message generation
 
     const redis = getRedisClient();
     
@@ -37,7 +37,7 @@ export async function POST(request, { params }) {
     const leadsData = await redis.hgetall(`campaign:${campaignId}:leads`);
     
     if (!leadsData || Object.keys(leadsData).length === 0) {
-      console.log(`📋 No leads found in Redis for campaign ${campaignId}`);
+      // No leads found in Redis cache
       return NextResponse.json({
         success: true,
         message: "No leads found in Redis cache for this campaign",
@@ -51,13 +51,16 @@ export async function POST(request, { params }) {
     const allLeads = Object.values(leadsData).map(leadStr => JSON.parse(leadStr));
     const leadsNeedingMessages = allLeads.filter(lead => 
       lead.status === 'completed' && 
+      lead.status !== 'error' &&
       (!lead.hasMessage || lead.hasMessage === false)
     );
 
-    console.log(`📋 Found ${allLeads.length} total leads, ${leadsNeedingMessages.length} ready for queuing (${allLeads.length - leadsNeedingMessages.length} already have messages)`);
+    const errorLeads = allLeads.filter(lead => lead.status === 'error').length;
+    const leadsWithMessages = allLeads.filter(lead => lead.hasMessage === true).length;
+    // Filtered leads for queuing
 
     if (leadsNeedingMessages.length === 0) {
-      console.log(`✅ All leads already have messages - no queuing needed`);
+      // All leads already have messages
       return NextResponse.json({
         success: true,
         message: "All leads already have messages generated",
@@ -65,14 +68,15 @@ export async function POST(request, { params }) {
           campaignId,
           leadsQueued: 0,
           totalLeads: allLeads.length,
-          leadsWithMessages: allLeads.length,
+          leadsWithMessages: leadsWithMessages,
+          errorLeads: errorLeads,
           workflow: "redis-first-optimized"
         }
       });
     }
 
     // Check current queue length to see if auto-queue already worked
-    const streamName = "leads:message-generation";
+    const streamName = `campaign:${campaignId}:message-generation`;
     const groupName = "message-generators";
     
     let currentQueueLength = 0;
@@ -95,7 +99,7 @@ export async function POST(request, { params }) {
       currentQueueLength = 0;
     }
 
-    console.log(`📊 Current queue length: ${currentQueueLength}`);
+    // Current queue length checked
 
     // Directly enqueue leads now for immediate availability
     const streamManager = new RedisStreamManager();
@@ -115,7 +119,7 @@ export async function POST(request, { params }) {
       enqueued++;
     }
 
-    console.log(`✅ Enqueued ${enqueued} leads to Redis stream (skipped ${allLeads.length - leadsNeedingMessages.length} with existing messages)`);
+    // Successfully enqueued leads
 
     return NextResponse.json({
       success: true,
@@ -124,7 +128,8 @@ export async function POST(request, { params }) {
         campaignId,
         leadsQueued: enqueued,
         totalLeads: allLeads.length,
-        leadsWithMessages: allLeads.length - leadsNeedingMessages.length,
+        leadsWithMessages: leadsWithMessages,
+        errorLeads: errorLeads,
         streamName: streamName,
         groupName: groupName,
         workflow: "redis-first-optimized",
