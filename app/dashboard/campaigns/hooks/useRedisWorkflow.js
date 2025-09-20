@@ -92,7 +92,11 @@ export function useRedisWorkflow() {
 
   // Trigger worker to process messages
   const processMessagesMutation = useMutation({
-    mutationFn: async ({ batchSize = 5, consumerName = 'web-worker' }) => {
+    mutationFn: async ({ batchSize = 5, consumerName = 'web-worker', campaignId }) => {
+      if (!campaignId) {
+        throw new Error('Campaign ID is required for message processing');
+      }
+
       try {
         const response = await fetch('/api/redis-workflow/workers/message-generator', {
           method: 'POST',
@@ -101,7 +105,8 @@ export function useRedisWorkflow() {
           },
           body: JSON.stringify({
             batchSize,
-            consumerName
+            consumerName,
+            campaignId
           })
         });
 
@@ -190,10 +195,15 @@ export function useRedisWorkflow() {
 
   // Process messages manually
   const processMessages = useCallback(async (options = {}) => {
+    if (!options.campaignId) {
+      throw new Error('Campaign ID is required for message processing');
+    }
+
     try {
       const result = await processMessagesMutation.mutateAsync({
         batchSize: options.batchSize || 5,
-        consumerName: options.consumerName || 'manual-worker'
+        consumerName: options.consumerName || 'manual-worker',
+        campaignId: options.campaignId
       });
       return result;
     } catch (error) {

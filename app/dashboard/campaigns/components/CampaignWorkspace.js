@@ -70,10 +70,11 @@ export default function CampaignWorkspace({ campaign, onBack }) {
   // Handle Redis workflow message generation
   const handleBulkGenerateMessages = async () => {
     try {
-      // Just process the existing queue instead of re-queuing
+      // Process messages for the current campaign only
       await processMessages({
         batchSize: 5,
-        consumerName: 'manual-generate'
+        consumerName: 'manual-generate',
+        campaignId: campaign.id
       });
       setShowBulkMessageDialog(false);
     } catch (error) {
@@ -449,7 +450,11 @@ export default function CampaignWorkspace({ campaign, onBack }) {
                           {redisStatus.redis?.queueLength > 0 && !isProcessingMessages && (
                             <div className="mt-2">
                               <button
-                                onClick={() => processMessages()}
+                                onClick={() => processMessages({
+                                  batchSize: 5,
+                                  consumerName: 'manual-process',
+                                  campaignId: campaign.id
+                                })}
                                 className="btn btn-xs btn-primary gap-1"
                                 disabled={isProcessingMessages}
                               >
