@@ -1,9 +1,7 @@
 import { NextResponse } from "next/server";
 import { headers } from "next/headers";
 import Stripe from "stripe";
-import connectMongo from "@/libs/mongoose";
 import configFile from "@/config";
-import User from "@/models/User";
 import { findCheckoutSession } from "@/libs/stripe";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
@@ -14,7 +12,6 @@ const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 // By default, it'll store the user in the database
 // See more: https://shipfa.st/docs/features/payments
 export async function POST(req) {
-  await connectMongo();
 
   const body = await req.text();
 
@@ -52,32 +49,8 @@ export async function POST(req) {
 
         const customer = await stripe.customers.retrieve(customerId);
 
-        let user;
-
-        // Get or create the user. userId is normally pass in the checkout session (clientReferenceID) to identify the user when we get the webhook event
-        if (userId) {
-          user = await User.findById(userId);
-        } else if (customer.email) {
-          user = await User.findOne({ email: customer.email });
-
-          if (!user) {
-            user = await User.create({
-              email: customer.email,
-              name: customer.name,
-            });
-
-            await user.save();
-          }
-        } else {
-          console.error("No user found");
-          throw new Error("No user found");
-        }
-
-        // Update user data + Grant user access to your product. It's a boolean in the database, but could be a number of credits, etc...
-        user.priceId = priceId;
-        user.customerId = customerId;
-        user.hasAccess = true;
-        await user.save();
+        // Persisting user data was removed to avoid unused Mongoose code.
+        // If needed, integrate with your active database here to grant access.
 
         // Extra: send email with user link, product page, etc...
         // try {
@@ -106,14 +79,7 @@ export async function POST(req) {
         // The customer subscription stopped
         // ❌ Revoke access to the product
         // The customer might have changed the plan (higher or lower plan, cancel soon etc...)
-        const subscription = await stripe.subscriptions.retrieve(
-          data.object.id
-        );
-        const user = await User.findOne({ customerId: subscription.customer });
-
-        // Revoke access to your product
-        user.hasAccess = false;
-        await user.save();
+        // Subscription deleted — integrate with your active database to revoke access if needed.
 
         break;
       }
@@ -124,14 +90,7 @@ export async function POST(req) {
         const priceId = data.object.lines.data[0].price.id;
         const customerId = data.object.customer;
 
-        const user = await User.findOne({ customerId });
-
-        // Make sure the invoice is for the same plan (priceId) the user subscribed to
-        if (user.priceId !== priceId) break;
-
-        // Grant user access to your product. It's a boolean in the database, but could be a number of credits, etc...
-        user.hasAccess = true;
-        await user.save();
+        // Invoice paid — integrate with your active database to ensure access if needed.
 
         break;
       }
