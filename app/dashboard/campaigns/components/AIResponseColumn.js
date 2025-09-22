@@ -72,8 +72,8 @@ const AIResponseColumn = memo(function AIResponseColumn({
   return (
     <div className="h-full flex flex-col bg-base-100">
       {/* Header */}
-      <div className="p-4 border-b border-base-300">
-        <div className="flex items-center justify-between mb-3">
+      <div className="p-3 border-b border-base-300">
+        <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-2">
             <Sparkles className="h-4 w-4 text-primary" />
             <h2 className="font-bold text-base-content">AI Message Generator</h2>

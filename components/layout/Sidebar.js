@@ -13,6 +13,7 @@ import {
   ChevronRight,
   Plus,
   UserCheck,
+  Workflow,
 } from "lucide-react";
 
 const menuItems = [
@@ -45,6 +46,12 @@ const menuItems = [
     label: "Accounts", 
     href: "/dashboard/accounts",
     key: "accounts" 
+  },
+  { 
+    icon: Workflow, 
+    label: "Workflows", 
+    href: "/dashboard/workflow",
+    key: "workflow" 
   },
   { 
     icon: Settings, 

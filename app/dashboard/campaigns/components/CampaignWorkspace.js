@@ -1,17 +1,18 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { ArrowLeft, Settings, Maximize2, Minimize2, Zap, Target, MessageSquare, BarChart3, Loader2 } from "lucide-react";
+import { ArrowLeft, Settings, Maximize2, Minimize2, Zap, Target, MessageSquare, BarChart3, Loader2, Workflow } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
+import { useRouter } from "next/navigation";
 import LeadsColumn from "./LeadsColumn";
 import PostsColumn from "./PostsColumn";
 import AIResponseColumn from "./AIResponseColumn";
 import { useLeads } from "../hooks/useLeads";
-import { useBulkMessageGeneration } from "../hooks/useBulkMessageGeneration";
 import { useRedisWorkflow } from "../hooks/useRedisWorkflow";
 
 export default function CampaignWorkspace({ campaign, onBack }) {
   const queryClient = useQueryClient();
+  const router = useRouter();
   const [selectedLead, setSelectedLead] = useState(null);
   const {
     leads,
@@ -44,7 +45,6 @@ export default function CampaignWorkspace({ campaign, onBack }) {
     processMessages,
     useLeadsReadyForMessages,
     useGenerationStatus,
-    isQueueing,
     isProcessingMessages
   } = useRedisWorkflow();
   
@@ -52,7 +52,7 @@ export default function CampaignWorkspace({ campaign, onBack }) {
 
   // Get Redis workflow data
   const { data: leadsReadyData, isLoading: loadingLeadsReady } = useLeadsReadyForMessages(campaign?.id);
-  const { data: statusData, isLoading: loadingStatus } = useGenerationStatus(campaign?.id);
+  const { data: statusData } = useGenerationStatus(campaign?.id);
   
   const leadsReadyCount = leadsReadyData?.data?.count || 0;
   const redisStatus = statusData?.data || {};
@@ -122,7 +122,6 @@ export default function CampaignWorkspace({ campaign, onBack }) {
       newWidths[0] = Math.max(20, Math.min(60, percentage));
       newWidths[1] = Math.max(20, 100 - newWidths[0] - newWidths[2]);
     } else if (dragColumn.current === 1) {
-      const totalLeft = newWidths[0] + percentage;
       newWidths[1] = Math.max(20, Math.min(60, percentage));
       newWidths[2] = Math.max(20, 100 - newWidths[0] - newWidths[1]);
     }
@@ -151,10 +150,16 @@ export default function CampaignWorkspace({ campaign, onBack }) {
     setIsFullscreen(!isFullscreen);
   };
 
+  const handleDesignWorkflow = () => {
+    // Navigate to workflow page with campaign name as query parameter
+    const campaignName = encodeURIComponent(campaign.name);
+    router.push(`/dashboard/workflow?campaign=${campaignName}&campaignId=${campaign.id}`);
+  };
+
   return (
-    <div className={`flex flex-col h-full ${isFullscreen ? "fixed inset-0 z-50 bg-base-100" : ""}`}>
+    <div className={`flex flex-col h-full overflow-hidden ${isFullscreen ? "fixed inset-0 z-50 bg-base-100" : ""}`}>
       {/* Modern Campaign Header with Stats */}
-      <div className="bg-gradient-to-r from-primary/5 to-secondary/5 border-b border-base-300 px-6 py-4">
+      <div className="bg-gradient-to-r from-primary/5 to-secondary/5 border-b border-base-300 px-6 py-2 flex-shrink-0">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-6">
             <button
@@ -352,6 +357,20 @@ export default function CampaignWorkspace({ campaign, onBack }) {
             <div className="p-6">
               {activeColumn === 'leads' && (
                 <div className="space-y-4">
+                  {/* Design Workflow Button - At the top */}
+                  <button
+                    onClick={() => {
+                      handleDesignWorkflow();
+                      setActiveColumn(null); // Close the sidebar
+                    }}
+                    className="btn btn-primary w-full gap-2"
+                  >
+                    <Workflow className="h-4 w-4" />
+                    Design Workflow
+                  </button>
+
+                  <div className="divider"></div>
+                  
                   <h4 className="font-semibold">Scraping Configuration</h4>
                   
                   {/* Posts per Profile */}
@@ -603,6 +622,7 @@ export default function CampaignWorkspace({ campaign, onBack }) {
           </div>
         </div>
       )}
+
     </div>
   );
 }

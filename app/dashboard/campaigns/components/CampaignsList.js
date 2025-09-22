@@ -361,6 +361,7 @@ export default function CampaignsList({ onSelectCampaign }) {
         onSubmit={handleEditCampaign}
         campaign={editingCampaign}
       />
+
     </div>
   );
 }

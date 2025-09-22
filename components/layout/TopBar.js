@@ -38,7 +38,7 @@ export default function TopBar({ title = "Campaigns" }) {
   };
 
   return (
-    <header className="h-16 bg-base-100 border-b border-base-300 px-6 flex items-center justify-between sticky top-0 z-40">
+    <header className="h-16 bg-base-100 border-b border-base-300 px-6 flex items-center justify-between z-40">
       {/* Left Section */}
       <div className="flex items-center gap-6">
         <div>
