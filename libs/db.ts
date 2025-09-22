@@ -1,7 +1,7 @@
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
-import * as schema from './schema.js';
+import * as schema from './schema';
 
 // Create the connection
 const connectionString = process.env.DATABASE_URL!;

@@ -7,6 +7,7 @@ export const users = pgTable('users', {
   email: text('email').notNull().unique(),
   name: text('name'),
   image: text('image'),
+  password: text('password'), // For email/password authentication
   googleId: text('google_id').unique(),
   stripeCustomerId: text('stripe_customer_id'),
   subscriptionStatus: varchar('subscription_status', { length: 20 }).default('free'),

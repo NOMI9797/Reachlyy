@@ -13,21 +13,20 @@ import {
 
 export default function TopBar({ title = "Campaigns" }) {
   const { data: session } = useSession();
-  const [theme, setTheme] = useState("light");
+  const [theme, setTheme] = useState("reachly");
   const [showUserMenu, setShowUserMenu] = useState(false);
 
   useEffect(() => {
-    // Get theme from localStorage or system preference
+    // Get theme from localStorage or use our custom theme
     const savedTheme = localStorage.getItem("theme");
-    const systemTheme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-    const currentTheme = savedTheme || systemTheme;
+    const currentTheme = savedTheme || "reachly";
     
     setTheme(currentTheme);
     document.documentElement.setAttribute("data-theme", currentTheme);
   }, []);
 
   const toggleTheme = () => {
-    const newTheme = theme === "light" ? "dark" : "light";
+    const newTheme = theme === "reachly" ? "reachly-dark" : "reachly";
     setTheme(newTheme);
     localStorage.setItem("theme", newTheme);
     document.documentElement.setAttribute("data-theme", newTheme);
@@ -62,7 +61,7 @@ export default function TopBar({ title = "Campaigns" }) {
           className="btn btn-ghost btn-sm btn-circle"
           aria-label="Toggle theme"
         >
-          {theme === "light" ? (
+          {theme === "reachly" ? (
             <Moon className="h-4 w-4" />
           ) : (
             <Sun className="h-4 w-4" />
