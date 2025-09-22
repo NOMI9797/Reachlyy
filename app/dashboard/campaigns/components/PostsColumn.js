@@ -53,8 +53,8 @@ const PostsColumn = memo(function PostsColumn({ selectedLead, collapsed, onToggl
   return (
     <div className="h-full flex flex-col bg-base-100">
       {/* Header */}
-      <div className="p-4 border-b border-base-300">
-        <div className="flex items-center justify-between mb-3">
+      <div className="p-3 border-b border-base-300">
+        <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-2">
             <h2 className="font-bold text-base-content">Recent Posts</h2>
             {posts.length > 0 && (

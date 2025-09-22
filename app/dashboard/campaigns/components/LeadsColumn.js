@@ -402,7 +402,7 @@ const LeadsColumn = memo(function LeadsColumn({
     <div className="h-full flex flex-col bg-base-100">
       {/* Header */}
       <div className="p-4 border-b border-base-300">
-        <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-2">
             <h2 className="font-bold text-base-content">Leads</h2>
             <div className="badge badge-primary badge-sm">{leads.length}</div>
@@ -416,7 +416,7 @@ const LeadsColumn = memo(function LeadsColumn({
         </div>
 
         {/* Search */}
-        <div className="relative mb-3">
+        <div className="relative mb-2">
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-base-content/40" />
           <input
             type="text"
@@ -428,7 +428,7 @@ const LeadsColumn = memo(function LeadsColumn({
         </div>
 
         {/* Action Buttons */}
-        <div className="grid grid-cols-2 gap-2 mb-3">
+        <div className="grid grid-cols-2 gap-2 mb-2">
           <button
             onClick={handleRunSelected}
             disabled={!selectedLead || isProcessing}

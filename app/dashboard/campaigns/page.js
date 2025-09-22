@@ -54,7 +54,7 @@ export default function CampaignsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-base-100 flex">
+    <div className="h-screen bg-base-100 flex overflow-hidden">
       {/* Sidebar */}
       <Sidebar
         collapsed={sidebarCollapsed}
@@ -65,12 +65,14 @@ export default function CampaignsPage() {
       {/* Main Content */}
       <div className={`flex-1 transition-all duration-300 ${
         sidebarCollapsed ? "ml-16" : "ml-64"
-      } flex flex-col`}>
+      } flex flex-col h-full overflow-hidden`}>
         {/* Top Bar */}
-        <TopBar title="Campaigns" />
+        <div className="flex-shrink-0">
+          <TopBar title="Campaigns" />
+        </div>
 
         {/* Content Area */}
-        <div className="flex-1 overflow-hidden">
+        <div className="flex-1 overflow-hidden min-h-0">
           {selectedCampaign ? (
             <CampaignWorkspace
               campaign={selectedCampaign}

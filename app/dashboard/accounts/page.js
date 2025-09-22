@@ -16,6 +16,7 @@ import {
   Trash2,
   Edit,
   Eye,
+  EyeOff,
   Users,
   MessageSquare,
   X,
@@ -32,6 +33,7 @@ export default function AccountsPage() {
   const accountsPerPage = 10;
   const [showLinkedInModal, setShowLinkedInModal] = useState(false);
   const [linkedInCredentials, setLinkedInCredentials] = useState({ email: '', password: '' });
+  const [showPassword, setShowPassword] = useState(false);
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' });
 
   // Use React Query hooks for LinkedIn accounts
@@ -132,6 +134,7 @@ export default function AccountsPage() {
   const handleCloseModal = () => {
     setShowLinkedInModal(false);
     setLinkedInCredentials({ email: '', password: '' });
+    setShowPassword(false);
   };
 
   const handleToggleActive = async (accountId, isActive) => {
@@ -555,16 +558,30 @@ export default function AccountsPage() {
                   <label htmlFor="linkedin-password" className="block text-sm font-medium text-base-content mb-2">
                     LinkedIn Password
                   </label>
-                  <input
-                    id="linkedin-password"
-                    type="password"
-                    value={linkedInCredentials.password}
-                    onChange={(e) => setLinkedInCredentials(prev => ({ ...prev, password: e.target.value }))}
-                    placeholder="Enter your LinkedIn password"
-                    className="input input-bordered w-full"
-                    disabled={isConnecting}
-                    required
-                  />
+                  <div className="relative">
+                    <input
+                      id="linkedin-password"
+                      type={showPassword ? "text" : "password"}
+                      value={linkedInCredentials.password}
+                      onChange={(e) => setLinkedInCredentials(prev => ({ ...prev, password: e.target.value }))}
+                      placeholder="Enter your LinkedIn password"
+                      className="input input-bordered w-full pr-10"
+                      disabled={isConnecting}
+                      required
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 top-1/2 transform -translate-y-1/2 text-base-content/40 hover:text-base-content/60 transition-colors"
+                      disabled={isConnecting}
+                    >
+                      {showPassword ? (
+                        <EyeOff className="h-4 w-4" />
+                      ) : (
+                        <Eye className="h-4 w-4" />
+                      )}
+                    </button>
+                  </div>
                 </div>
               </div>
 
