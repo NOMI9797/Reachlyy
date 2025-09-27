@@ -1,22 +1,22 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
-import { ZoomIn, ZoomOut, Maximize2, Minimize2, RefreshCcw, Save, LayoutTemplate } from "lucide-react";
-import ReactFlow, { Background, Controls, MiniMap, addEdge, Handle, Position, useEdgesState, useNodesState } from "reactflow";
+import { useCallback, useMemo, useRef, useState } from "react";
+import { ZoomIn, ZoomOut, Maximize2, Minimize2, RefreshCcw, Save, LayoutTemplate, Crosshair } from "lucide-react";
+import ReactFlow, { Background, Controls, MiniMap, addEdge, Handle, Position, useEdgesState, useNodesState, MarkerType } from "reactflow";
 import "reactflow/dist/style.css";
 
-function BaseNode({ icon, title, subtitle, status = "pending", isStart = false }) {
+function BaseNode({ icon, title, subtitle, status = "pending", isStart = false, selected = false }) {
   const getStatusColor = () => {
     switch (status) {
-      case "completed": return "border-green-500 bg-green-50";
-      case "running": return "border-blue-500 bg-blue-50";
-      case "error": return "border-red-500 bg-red-50";
-      default: return "border-gray-300 bg-white";
+      case "completed": return "border-emerald-500 bg-emerald-50";
+      case "running": return "border-sky-500 bg-sky-50";
+      case "error": return "border-rose-500 bg-rose-50";
+      default: return "border-gray-200 bg-white";
     }
   };
 
   return (
-    <div className={`px-4 py-3 shadow-sm rounded-lg border-2 ${getStatusColor()} min-w-[200px]`}>
+    <div className={`px-4 py-3 rounded-xl border ${getStatusColor()} min-w-[220px] shadow-sm ${selected ? "ring-2 ring-primary/30" : ""}`}>
       <div className="flex items-center gap-3">
         <div className="w-8 h-8 bg-gray-100 rounded-full flex items-center justify-center text-sm">
           {icon}
@@ -26,7 +26,7 @@ function BaseNode({ icon, title, subtitle, status = "pending", isStart = false }
           {subtitle && <div className="text-xs text-gray-500 mt-1">{subtitle}</div>}
         </div>
         {isStart && (
-          <div className="bg-green-100 text-green-800 text-xs px-2 py-1 rounded-full font-medium">
+          <div className="bg-emerald-100 text-emerald-800 text-[10px] px-2 py-0.5 rounded-full font-medium">
             START
           </div>
         )}
@@ -35,7 +35,7 @@ function BaseNode({ icon, title, subtitle, status = "pending", isStart = false }
   );
 }
 
-const VisitNode = ({ data }) => (
+const VisitNode = ({ data, selected }) => (
   <div>
     <Handle type="target" position={Position.Top} className="w-3 h-3" />
     <BaseNode 
@@ -44,12 +44,13 @@ const VisitNode = ({ data }) => (
       subtitle="View profile page" 
       status={data?.status}
       isStart={data?.isStart}
+      selected={selected}
     />
     <Handle type="source" position={Position.Bottom} className="w-3 h-3" />
   </div>
 );
 
-const FollowNode = ({ data }) => (
+const FollowNode = ({ data, selected }) => (
   <div>
     <Handle type="target" position={Position.Top} className="w-3 h-3" />
     <BaseNode 
@@ -57,12 +58,13 @@ const FollowNode = ({ data }) => (
       title="Follow" 
       subtitle="Follow the user" 
       status={data?.status}
+      selected={selected}
     />
     <Handle type="source" position={Position.Bottom} className="w-3 h-3" />
   </div>
 );
 
-const ConnectNode = ({ data }) => (
+const ConnectNode = ({ data, selected }) => (
   <div>
     <Handle type="target" position={Position.Top} className="w-3 h-3" />
     <BaseNode 
@@ -70,12 +72,13 @@ const ConnectNode = ({ data }) => (
       title="Connect" 
       subtitle="Send connection request" 
       status={data?.status}
+      selected={selected}
     />
     <Handle type="source" position={Position.Bottom} className="w-3 h-3" />
   </div>
 );
 
-const DelayNode = ({ data }) => (
+const DelayNode = ({ data, selected }) => (
   <div>
     <Handle type="target" position={Position.Top} className="w-3 h-3" />
     <BaseNode 
@@ -83,12 +86,13 @@ const DelayNode = ({ data }) => (
       title="Wait" 
       subtitle={data?.delay || "2-4 hours"} 
       status={data?.status}
+      selected={selected}
     />
     <Handle type="source" position={Position.Bottom} className="w-3 h-3" />
   </div>
 );
 
-const MessageNode = ({ data }) => (
+const MessageNode = ({ data, selected }) => (
   <div>
     <Handle type="target" position={Position.Top} className="w-3 h-3" />
     <BaseNode 
@@ -96,20 +100,26 @@ const MessageNode = ({ data }) => (
       title="Message" 
       subtitle={data?.messageType || "Message 1"} 
       status={data?.status}
+      selected={selected}
     />
     <Handle type="source" position={Position.Bottom} className="w-3 h-3" />
   </div>
 );
 
-const BranchNode = ({ data }) => (
-  <div>
+const BranchNode = ({ data, selected }) => (
+  <div className="relative">
     <Handle type="target" position={Position.Top} className="w-3 h-3" />
-    <BaseNode 
-      icon="🔀" 
-      title="Branch" 
-      subtitle={data?.condition || "Reply detected?"} 
-      status={data?.status}
-    />
+    <div className={`relative min-w-[200px]`}>
+      <div className="mx-auto w-28 h-28 relative">
+        <div className={`absolute inset-0 rotate-45 rounded-lg border ${data?.status === "error" ? "border-rose-500 bg-rose-50" : data?.status === "running" ? "border-sky-500 bg-sky-50" : data?.status === "completed" ? "border-emerald-500 bg-emerald-50" : "border-gray-200 bg-white"} shadow-sm ${selected ? "ring-2 ring-primary/30" : ""}`}></div>
+        <div className="absolute inset-0 -rotate-45 flex items-center justify-center">
+          <div className="text-center">
+            <div className="text-sm font-semibold text-gray-900">Branch</div>
+            <div className="text-xs text-gray-500 mt-1">{data?.condition || "Reply detected?"}</div>
+          </div>
+        </div>
+      </div>
+    </div>
     <Handle id="yes" type="source" position={Position.Right} className="w-3 h-3" />
     <Handle id="no" type="source" position={Position.Bottom} className="w-3 h-3" />
   </div>
@@ -149,6 +159,7 @@ export default function SequenceCanvas() {
   const [fullscreen, setFullscreen] = useState(false);
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
+  const [selectedNodeId, setSelectedNodeId] = useState(null);
   const wrapperRef = useRef(null);
   const rfInstance = useRef(null);
 
@@ -158,7 +169,7 @@ export default function SequenceCanvas() {
   }, []);
 
   const onConnect = useCallback(
-    (connection) => setEdges((eds) => addEdge(connection, eds)),
+    (connection) => setEdges((eds) => addEdge({ ...connection, type: "smoothstep" }, eds)),
     [setEdges]
   );
 
@@ -193,12 +204,18 @@ export default function SequenceCanvas() {
     event.dataTransfer.dropEffect = "move";
   }, []);
 
+  const onNodeClick = useCallback((_, node) => {
+    setSelectedNodeId(node?.id || null);
+  }, []);
+
+  const selectedNode = useMemo(() => nodes.find((n) => n.id === selectedNodeId) || null, [nodes, selectedNodeId]);
+
   return (
     <div className={`h-full w-full ${fullscreen ? "fixed inset-0 z-50 bg-base-100" : ""}`}>
       <div className="h-full flex">
         {/* Left Palette */}
-        <div className="w-64 border-r border-base-300 p-4 bg-base-100 flex-shrink-0">
-          <div className="text-sm font-semibold mb-3">Workflow Steps</div>
+        <div className="w-64 border-r border-base-300 p-4 bg-base-100 flex-shrink-0 overflow-y-auto min-h-0">
+          <div className="text-[13px] font-semibold mb-3 text-base-content/80">Workflow Steps</div>
           <div className="grid grid-cols-1 gap-2">
             {[
               { type: "visit", label: "Visit Profile", emoji: "👁️" },
@@ -210,13 +227,13 @@ export default function SequenceCanvas() {
             ].map((n) => (
               <div
                 key={n.type}
-                className="p-3 rounded border bg-base-100 hover:bg-base-200 cursor-grab active:cursor-grabbing select-none"
+                className="p-3 rounded-lg border border-base-300 bg-white hover:bg-base-200/60 cursor-grab active:cursor-grabbing select-none shadow-sm"
                 draggable
                 onDragStart={(e) => onDragStartPalette(e, n.type)}
               >
-                <div className="flex items-center gap-2 text-sm">
-                  <span>{n.emoji}</span>
-                  <span>{n.label}</span>
+                <div className="flex items-center gap-3 text-[13px]">
+                  <span className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-gray-100 text-sm">{n.emoji}</span>
+                  <span className="font-medium text-gray-800">{n.label}</span>
                 </div>
               </div>
             ))}
@@ -225,25 +242,25 @@ export default function SequenceCanvas() {
 
         {/* Canvas */}
         <div className="flex-1 relative" ref={wrapperRef}>
-          {/* Vertical Toolbar */}
-          <div className="absolute left-4 top-4 z-10 flex flex-col gap-2">
-            <button className="btn btn-sm btn-square" onClick={handleZoomIn} title="Zoom in">
+          {/* Right Vertical Toolbar */}
+          <div className="absolute right-4 top-1/2 -translate-y-1/2 z-10 flex flex-col gap-2">
+            <button className="btn btn-sm btn-square btn-ghost border border-base-300" onClick={handleZoomIn} title="Zoom in">
               <ZoomIn className="h-4 w-4" />
             </button>
-            <button className="btn btn-sm btn-square" onClick={handleReset} title="Reset position">
-              <RefreshCcw className="h-4 w-4" />
-            </button>
-            <button className="btn btn-sm btn-square" onClick={handleZoomOut} title="Zoom out">
+            <button className="btn btn-sm btn-square btn-ghost border border-base-300" onClick={handleZoomOut} title="Zoom out">
               <ZoomOut className="h-4 w-4" />
             </button>
+            <button className="btn btn-sm btn-square btn-ghost border border-base-300" onClick={handleReset} title="Fit to view">
+              <Crosshair className="h-4 w-4" />
+            </button>
             <div className="divider my-1"></div>
-            <button className="btn btn-sm btn-square" onClick={toggleFullscreen} title={fullscreen ? "Exit full screen" : "Enter full screen"}>
+            <button className="btn btn-sm btn-square btn-ghost border border-base-300" onClick={toggleFullscreen} title={fullscreen ? "Exit full screen" : "Enter full screen"}>
               {fullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
             </button>
-            <button className="btn btn-sm btn-square" title="Save as template">
+            <button className="btn btn-sm btn-square btn-ghost border border-base-300" title="Save as template">
               <Save className="h-4 w-4" />
             </button>
-            <button className="btn btn-sm btn-square" title="Back to templates">
+            <button className="btn btn-sm btn-square btn-ghost border border-base-300" title="Back to templates">
               <LayoutTemplate className="h-4 w-4" />
             </button>
           </div>
@@ -257,19 +274,81 @@ export default function SequenceCanvas() {
             onInit={onInit}
             nodeTypes={nodeTypes}
             fitView
+            proOptions={{ hideAttribution: true }}
+            snapToGrid
+            snapGrid={[16, 16]}
+            minZoom={0.4}
+            maxZoom={1.5}
+            defaultEdgeOptions={{
+              type: "smoothstep",
+              animated: false,
+              style: { stroke: "#94a3b8", strokeWidth: 2 },
+              markerEnd: { type: MarkerType.ArrowClosed, width: 18, height: 18, color: "#94a3b8" },
+            }}
+            connectionLineStyle={{ stroke: "#94a3b8", strokeWidth: 2 }}
             onDrop={onDrop}
             onDragOver={onDragOver}
+            onNodeClick={onNodeClick}
           >
-            <MiniMap />
+            <MiniMap maskColor="rgba(0,0,0,0.04)" nodeStrokeColor="#94a3b8" nodeColor="#f8fafc" />
             <Controls showInteractive={false} />
-            <Background variant="dots" gap={16} size={1} />
+            <Background variant="dots" gap={18} size={1} color="#e5e7eb" />
           </ReactFlow>
         </div>
 
-        {/* Right Inspector placeholder */}
-        <div className="w-80 border-l border-base-300 p-4 bg-base-100 flex-shrink-0">
+        {/* Right Inspector */}
+        <div className="w-80 border-l border-base-300 p-4 bg-base-100 flex-shrink-0 overflow-y-auto min-h-0">
           <div className="text-sm font-semibold mb-3">Configuration</div>
-          <div className="text-xs text-base-content/60">Select a node to configure its settings.</div>
+          {!selectedNode && (
+            <div className="text-xs text-base-content/60">Select a node to configure its settings.</div>
+          )}
+          {selectedNode && (
+            <div className="space-y-4">
+              <div>
+                <div className="text-[13px] text-base-content/70">Type</div>
+                <div className="text-sm font-medium mt-1 capitalize">{selectedNode.type}</div>
+              </div>
+              {selectedNode.type === "wait" && (
+                <div className="space-y-2">
+                  <label className="text-[13px] text-base-content/70">Delay label</label>
+                  <input
+                    className="input input-sm input-bordered w-full"
+                    value={selectedNode.data?.delay || ""}
+                    onChange={(e) =>
+                      setNodes((nds) => nds.map((n) => n.id === selectedNode.id ? { ...n, data: { ...n.data, delay: e.target.value } } : n))
+                    }
+                    placeholder="e.g. 2-4 hours"
+                  />
+                </div>
+              )}
+              {selectedNode.type === "message" && (
+                <div className="space-y-2">
+                  <label className="text-[13px] text-base-content/70">Label</label>
+                  <input
+                    className="input input-sm input-bordered w-full"
+                    value={selectedNode.data?.messageType || ""}
+                    onChange={(e) =>
+                      setNodes((nds) => nds.map((n) => n.id === selectedNode.id ? { ...n, data: { ...n.data, messageType: e.target.value } } : n))
+                    }
+                    placeholder="Follow-up message"
+                  />
+                </div>
+              )}
+              {selectedNode.type === "branch" && (
+                <div className="space-y-2">
+                  <label className="text-[13px] text-base-content/70">Condition</label>
+                  <input
+                    className="input input-sm input-bordered w-full"
+                    value={selectedNode.data?.condition || ""}
+                    onChange={(e) =>
+                      setNodes((nds) => nds.map((n) => n.id === selectedNode.id ? { ...n, data: { ...n.data, condition: e.target.value } } : n))
+                    }
+                    placeholder="Reply detected?"
+                  />
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>

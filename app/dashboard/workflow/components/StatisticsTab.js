@@ -38,6 +38,3 @@ export default function StatisticsTab() {
     </div>
   );
 }
-
-
-
