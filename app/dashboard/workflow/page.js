@@ -9,7 +9,7 @@ import WorkflowLayout from "./components/WorkflowLayout";
 import AudienceTab from "./components/AudienceTab";
 import SequenceTemplates from "./components/SequenceTemplates";
 import LeadGenerationCanvas from "./templates/lead-generation/LeadGenerationCanvas";
-import EndorseSkillsCanvas from "./templates/endorse-skills/EndorseSkillsCanvas";
+import SendInviteCanvas from "./templates/send-invite/SendInviteCanvas";
 import ExtraProfileViewsCanvas from "./templates/extra-profile-views/ExtraProfileViewsCanvas";
 import StatisticsTab from "./components/StatisticsTab";
 import SettingsTab from "./components/SettingsTab";
@@ -128,7 +128,7 @@ export default function WorkflowPage() {
               SequenceTab={() => {
                 const template = searchParams.get('template');
                 if (template === 'lead-generation') return <LeadGenerationCanvas />;
-                if (template === 'endorse-my-skills') return <EndorseSkillsCanvas />;
+                if (template === 'endorse-my-skills') return <SendInviteCanvas />;
                 if (template === 'extra-profile-views') return <ExtraProfileViewsCanvas />;
                 return <SequenceTemplates />;
               }}

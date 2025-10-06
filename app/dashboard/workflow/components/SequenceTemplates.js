@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import LeadGenerationPreview from "../templates/lead-generation/Preview";
-import EndorseSkillsPreview from "../templates/endorse-skills/Preview";
+import EndorseSkillsPreview from "../templates/send-invite/Preview";
 import ExtraProfileViewsPreview from "../templates/extra-profile-views/Preview";
 
 const templates = [
@@ -13,8 +13,8 @@ const templates = [
   },
   {
     id: "endorse-my-skills",
-    title: "Endorse My Skills",
-    description: "Engagement sequence to drive endorsements",
+    title: "Send Invite",
+    description: "Simple workflow to send a connection invite",
   },
   {
     id: "extra-profile-views",

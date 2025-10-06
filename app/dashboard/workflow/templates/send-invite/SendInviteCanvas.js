@@ -40,16 +40,14 @@ function DelayEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition, tar
 const nodeWrapperStyle = { boxShadow: 'none', background: 'transparent', border: 'none', padding: 0 };
 
 const initialNodes = [
-  { id: "node1", position: { x: 250, y: 100 }, data: { label: "Endorse skills", icon: "✓" }, type: "default", style: nodeWrapperStyle },
-  { id: "node2", position: { x: 250, y: 300 }, data: { label: "Endorse skills", icon: "✓" }, style: nodeWrapperStyle },
-  { id: "node3", position: { x: 250, y: 500 }, data: { label: "Endorse skills", icon: "✓" }, style: nodeWrapperStyle },
-  { id: "end", position: { x: 250, y: 700 }, data: { label: "End of sequence", isEnd: true, icon: "■" }, style: nodeWrapperStyle },
+  { id: "start", position: { x: 250, y: 100 }, data: { label: "Start", icon: "🛈" }, type: "default", style: nodeWrapperStyle },
+  { id: "invite", position: { x: 250, y: 300 }, data: { label: "Send invite", icon: "✉" }, style: nodeWrapperStyle },
+  { id: "end", position: { x: 250, y: 500 }, data: { label: "End of sequence", isEnd: true, icon: "■" }, style: nodeWrapperStyle },
 ];
 
 const initialEdges = [
-  { id: "e1-2", source: "node1", target: "node2", type: "delay", data: { pill: "5 days" }, style: edgeStyle, markerEnd: { type: MarkerType.ArrowClosed, color: "#3b475e" } },
-  { id: "e2-3", source: "node2", target: "node3", type: "delay", data: { pill: "10 days" }, style: edgeStyle, markerEnd: { type: MarkerType.ArrowClosed, color: "#3b475e" } },
-  { id: "e3-end", source: "node3", target: "end", type: "delay", data: { pill: "No delay" }, style: edgeStyle, markerEnd: { type: MarkerType.ArrowClosed, color: "#3b475e" } },
+  { id: "e-start-invite", source: "start", target: "invite", type: "delay", data: { pill: "Immediately" }, style: edgeStyle, markerEnd: { type: MarkerType.ArrowClosed, color: "#3b475e" } },
+  { id: "e-invite-end", source: "invite", target: "end", type: "delay", data: { pill: "No delay" }, style: edgeStyle, markerEnd: { type: MarkerType.ArrowClosed, color: "#3b475e" } },
 ];
 
 function DarkNode({ data, id }) {
@@ -97,7 +95,7 @@ function DarkNode({ data, id }) {
 const nodeTypes = { default: DarkNode };
 const edgeTypes = { delay: DelayEdge };
 
-export default function EndorseSkillsCanvas({ campaignName, campaignId }) {
+export default function SendInviteCanvas({ campaignName, campaignId }) {
   const router = useRouter();
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
@@ -298,8 +296,8 @@ export default function EndorseSkillsCanvas({ campaignName, campaignId }) {
             <button className="btn btn-ghost btn-sm text-slate-400 hover:text-slate-200" onClick={() => {/* TODO: hook cancel */}}>
               Cancel
             </button>
-            <button className="btn btn-primary btn-sm px-6 font-medium shadow-lg hover:shadow-xl transition-all duration-200" onClick={() => {/* TODO: hook save */}}>
-              Save
+            <button className="btn btn-primary btn-sm px-6 font-medium shadow-lg hover:shadow-xl transition-all duration-200" onClick={() => {/* TODO: hook run workflow */}}>
+              Run Workflow
             </button>
           </div>
         </div>
