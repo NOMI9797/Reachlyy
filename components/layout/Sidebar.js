@@ -65,7 +65,7 @@ export default function Sidebar({ collapsed, onToggle, activeSection = "campaign
   const pathname = usePathname();
 
   return (
-    <div className={`bg-base-200 border-r border-base-300 transition-all duration-300 flex flex-col fixed left-0 top-0 h-full z-50 ${
+    <div className={`bg-base-200 border-r border-base-300 transition-all duration-300 flex flex-col fixed left-0 top-0 h-screen z-50 ${
       collapsed ? "w-16" : "w-64"
     }`}>
       {/* Header */}
@@ -94,7 +94,7 @@ export default function Sidebar({ collapsed, onToggle, activeSection = "campaign
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 p-2">
+      <nav className="flex-1 p-2 overflow-y-auto min-h-0">
         <div className="space-y-1">
           {menuItems.map((item) => {
             const isActive = pathname === item.href || activeSection === item.key;
