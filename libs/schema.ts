@@ -38,6 +38,8 @@ export const leads = pgTable('leads', {
   status: varchar('status', { length: 20 }).notNull().default('pending'),
   profilePicture: text('profile_picture'),
   posts: json('posts'), // Store scraped posts as JSON array
+  inviteSent: boolean('invite_sent').default(false).notNull(),
+  inviteStatus: varchar('invite_status', { length: 20 }).default('pending').notNull(), // pending, sent, accepted, rejected, failed
   addedAt: timestamp('added_at').defaultNow().notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
