@@ -165,6 +165,121 @@ export class RedisStreamManager {
       return 0; // Return 0 if error (stream might not exist)
     }
   }
+
+  // BATCH PROCESSING METHODS
+
+  // Add batch to stream (for invite sending)
+  async addBatchToStream(streamName, batchData) {
+    try {
+      const messageId = await this.redis.xadd(
+        streamName,
+        '*', // Auto-generate message ID
+        'batch_id', batchData.batch_id,
+        'campaign_id', batchData.campaign_id,
+        'linkedin_account_id', batchData.linkedin_account_id,
+        'custom_message', batchData.custom_message || '',
+        'batch_size', batchData.batch_size.toString(),
+        'created_at', batchData.created_at,
+        'leads', JSON.stringify(batchData.leads) // Serialize leads array
+      );
+      console.log(`📦 BATCH: Added batch ${batchData.batch_id} to stream ${streamName}`);
+      return messageId;
+    } catch (error) {
+      console.error('❌ Error adding batch to stream:', error);
+      throw error;
+    }
+  }
+
+  // Read batch from stream
+  async readBatchFromStream(streamName, groupName, consumerName, count = 1) {
+    try {
+      const result = await this.redis.xreadgroup(
+        'GROUP', groupName, consumerName,
+        'COUNT', count,
+        'STREAMS', streamName, '>'
+      );
+      return result;
+    } catch (error) {
+      console.error('❌ Error reading batch from stream:', error);
+      throw error;
+    }
+  }
+
+  // Acknowledge batch
+  async acknowledgeBatch(streamName, groupName, messageId) {
+    try {
+      await this.redis.xack(streamName, groupName, messageId);
+      console.log(`✅ BATCH: Acknowledged batch ${messageId}`);
+    } catch (error) {
+      console.error('❌ Error acknowledging batch:', error);
+      throw error;
+    }
+  }
+
+  // Get batch info
+  async getBatchInfo(streamName) {
+    try {
+      const info = await this.redis.xinfo('STREAM', streamName);
+      return info;
+    } catch (error) {
+      console.error('❌ Error getting batch info:', error);
+      throw error;
+    }
+  }
+
+  // Get batch pending count
+  async getBatchPendingCount(streamName, groupName) {
+    try {
+      const pendingInfo = await this.redis.xpending(streamName, groupName);
+      return pendingInfo ? pendingInfo[0] : 0;
+    } catch (error) {
+      console.error('❌ Error getting batch pending count:', error);
+      return 0;
+    }
+  }
+
+  // BATCH PROCESSING LOCK METHODS
+
+  // Acquire batch processing lock
+  async acquireBatchLock(lockKey, ttlSeconds = 300) { // 5 minutes default TTL
+    try {
+      const lockValue = `${Date.now()}-${Math.random()}`;
+      const result = await this.redis.set(lockKey, lockValue, 'NX', 'EX', ttlSeconds);
+      return result === 'OK' ? lockValue : null;
+    } catch (error) {
+      console.error('❌ Error acquiring batch lock:', error);
+      return null;
+    }
+  }
+
+  // Release batch processing lock
+  async releaseBatchLock(lockKey, lockValue) {
+    try {
+      const script = `
+        if redis.call("get", KEYS[1]) == ARGV[1] then
+          return redis.call("del", KEYS[1])
+        else
+          return 0
+        end
+      `;
+      const result = await this.redis.eval(script, 1, lockKey, lockValue);
+      return result === 1;
+    } catch (error) {
+      console.error('❌ Error releasing batch lock:', error);
+      return false;
+    }
+  }
+
+  // Check if batch processing is locked
+  async isBatchLocked(lockKey) {
+    try {
+      const lockValue = await this.redis.get(lockKey);
+      return lockValue !== null;
+    } catch (error) {
+      console.error('❌ Error checking batch lock:', error);
+      return false;
+    }
+  }
 }
 
 export default getRedisClient;

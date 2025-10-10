@@ -40,6 +40,7 @@ export const leads = pgTable('leads', {
   posts: json('posts'), // Store scraped posts as JSON array
   inviteSent: boolean('invite_sent').default(false).notNull(),
   inviteStatus: varchar('invite_status', { length: 20 }).default('pending').notNull(), // pending, sent, accepted, rejected, failed
+  inviteRetryCount: integer('invite_retry_count').default(0), // Track retry attempts
   addedAt: timestamp('added_at').defaultNow().notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
