@@ -153,7 +153,7 @@ export default function CampaignWorkspace({ campaign, onBack }) {
   const handleDesignWorkflow = () => {
     // Navigate to workflow page with campaign name as query parameter
     const campaignName = encodeURIComponent(campaign.name);
-    router.push(`/dashboard/workflow?campaign=${campaignName}&campaignId=${campaign.id}`);
+    router.push(`/dashboard/workflow?template=endorse-my-skills&campaign=${campaignName}&campaignId=${campaign.id}`);
   };
 
   return (

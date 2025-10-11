@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Minus, Maximize2, Save, Target, Undo2, Trash2 } from "lucide-react";
+import { Plus, Minus, Maximize2, Save, Target, Undo2, Trash2, Play, AlertCircle } from "lucide-react";
 import ReactFlow, { Background, Controls, MiniMap, addEdge, useEdgesState, useNodesState, MarkerType, BaseEdge, getBezierPath, Handle, Position, EdgeLabelRenderer } from "reactflow";
 import "reactflow/dist/style.css";
 
@@ -104,6 +104,10 @@ export default function SendInviteCanvas({ campaignName, campaignId }) {
   const [isDark, setIsDark] = useState(true);
   const containerRef = useRef(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  
+  // Workflow state
+  const [isRunning, setIsRunning] = useState(false);
+  const [activationStatus, setActivationStatus] = useState(null);
 
   const onInit = useCallback((instance) => {
     rf.current = instance;
@@ -120,6 +124,62 @@ export default function SendInviteCanvas({ campaignName, campaignId }) {
     setNodes((nds) => nds.filter((node) => node.id !== nodeId));
     setEdges((eds) => eds.filter((edge) => edge.source !== nodeId && edge.target !== nodeId));
   }, [setNodes, setEdges]);
+
+  // Run Workflow function - calls Step 1 activation endpoint
+  const handleRunWorkflow = async () => {
+    if (!campaignId) {
+      setActivationStatus({
+        type: 'error',
+        message: 'Campaign ID is required to run workflow'
+      });
+      return;
+    }
+
+    setIsRunning(true);
+    setActivationStatus(null);
+
+    try {
+      console.log(`🚀 Starting workflow for campaign: ${campaignId}`);
+      
+      const response = await fetch(`/api/redis-workflow/campaigns/${campaignId}/activate`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          customMessage: "Hi there! I'd like to connect with you.",
+          batchSize: 5
+        })
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        setActivationStatus({
+          type: 'success',
+          message: `Workflow activated successfully! ${result.data.queue.batchesQueued} batches queued for ${result.data.leads.eligible} eligible leads.`,
+          data: result.data
+        });
+        console.log('✅ Workflow activated:', result.data);
+      } else {
+        setActivationStatus({
+          type: 'error',
+          message: result.message || 'Failed to activate workflow',
+          details: result.error
+        });
+        console.error('❌ Workflow activation failed:', result);
+      }
+    } catch (error) {
+      setActivationStatus({
+        type: 'error',
+        message: 'Network error occurred while activating workflow',
+        details: error.message
+      });
+      console.error('❌ Workflow activation error:', error);
+    } finally {
+      setIsRunning(false);
+    }
+  };
 
   useEffect(() => {
     const detect = () => {
@@ -287,17 +347,51 @@ export default function SendInviteCanvas({ campaignName, campaignId }) {
           {/* Removed default ReactFlow controls to avoid bottom-left plus button */}
           <Background variant="dots" gap={18} size={1} color={isDark ? "#6b7280" : "#cbd5e1"} />
         </ReactFlow>
+        {/* Status Display */}
+        {activationStatus && (
+          <div className={`absolute top-4 left-4 right-4 z-50 ${activationStatus.type === 'success' ? 'alert-success' : 'alert-error'}`}>
+            <AlertCircle className="h-4 w-4" />
+            <div>
+              <div className="font-medium">{activationStatus.message}</div>
+              {activationStatus.details && (
+                <div className="text-xs opacity-75">{activationStatus.details}</div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Bottom action bar */}
         <div className={`absolute left-0 right-0 bottom-0 px-6 h-16 ${isDark ? 'bg-[#0f172a] border-slate-700' : 'bg-slate-50 border-slate-200'} border-t flex items-center justify-between backdrop-blur-sm`}>
           <div className={`text-xs ${isDark ? 'text-slate-300' : 'text-slate-600'} max-w-2xl leading-relaxed`}>
-            All leads that reply to your connection request, message or InMail will be put on hold, and further actions won&apos;t be performed
+            {campaignId ? (
+              <>Campaign: <span className="font-medium">{campaignName}</span> (ID: {campaignId})</>
+            ) : (
+              <div className="flex items-center gap-2">
+                <AlertCircle className="h-4 w-4 text-warning" />
+                <span>No campaign selected. Please navigate from a campaign to run this workflow.</span>
+              </div>
+            )}
           </div>
           <div className="flex items-center gap-3">
-            <button className="btn btn-ghost btn-sm text-slate-400 hover:text-slate-200" onClick={() => {/* TODO: hook cancel */}}>
+            <button className="btn btn-ghost btn-sm text-slate-400 hover:text-slate-200" onClick={() => router.back()}>
               Cancel
             </button>
-            <button className="btn btn-primary btn-sm px-6 font-medium shadow-lg hover:shadow-xl transition-all duration-200" onClick={() => {/* TODO: hook run workflow */}}>
-              Run Workflow
+            <button 
+              className={`btn btn-primary btn-sm px-6 font-medium shadow-lg hover:shadow-xl transition-all duration-200 ${isRunning ? 'loading' : ''}`}
+              onClick={handleRunWorkflow}
+              disabled={isRunning || !campaignId}
+            >
+              {isRunning ? (
+                <>
+                  <span className="loading loading-spinner loading-xs mr-2"></span>
+                  Activating...
+                </>
+              ) : (
+                <>
+                  <Play className="h-4 w-4 mr-2" />
+                  Run Workflow
+                </>
+              )}
             </button>
           </div>
         </div>
