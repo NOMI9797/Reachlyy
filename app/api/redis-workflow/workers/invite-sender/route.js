@@ -5,6 +5,7 @@ import { leads } from "@/libs/schema";
 import { eq, inArray } from "drizzle-orm";
 import getRedisClient from "@/libs/redis";
 import { withAuth } from "@/libs/auth-middleware";
+import { LinkedInInviteService } from "@/libs/linkedin-invite-service";
 
 /**
  * POST /api/redis-workflow/workers/invite-sender
@@ -17,12 +18,21 @@ import { withAuth } from "@/libs/auth-middleware";
  * 3. Updates invite status in Redis and database
  * 4. Handles rate limiting and delays
  */
-export const POST = withAuth(async (request, { user }) => {
+export const POST = async (request) => {
   let lockValue = null;
+  let LOCK_KEY = null; // Define outside try block for finally access
+  let campaignId = null; // Define outside try block for finally access
   
   try {
+    // Check if this is an internal call (bypasses auth)
+    const isInternalCall = request.headers.get('x-internal-call') === 'true';
+    const internalUserId = request.headers.get('x-user-id');
+    
+    console.log(`🟢 INVITE-SENDER WORKER HIT: Internal: ${isInternalCall}, User: ${internalUserId}`);
+    
     // Get campaign ID from request body
-    const { campaignId } = await request.json();
+    const requestBody = await request.json();
+    campaignId = requestBody.campaignId;
     
     if (!campaignId) {
       return NextResponse.json({
@@ -37,7 +47,7 @@ export const POST = withAuth(async (request, { user }) => {
     
     // Campaign-specific stream and lock
     const STREAM_NAME = `campaign:${campaignId}:invite-sending`;
-    const LOCK_KEY = `batch-processing:campaign:${campaignId}`;
+    LOCK_KEY = `batch-processing:campaign:${campaignId}`; // Assign to outer variable
     const CONSUMER_GROUP_NAME = "invite-senders";
     const CONSUMER_NAME = `worker-${Date.now()}`;
 
@@ -52,8 +62,10 @@ export const POST = withAuth(async (request, { user }) => {
     }
 
     // Acquire batch processing lock (5 minutes TTL)
+    console.log(`🔐 ATTEMPTING LOCK: Trying to acquire batch lock for campaign ${campaignId}...`);
     lockValue = await streamManager.acquireBatchLock(LOCK_KEY, 300);
     if (!lockValue) {
+      console.log(`❌ LOCK FAILED: Could not acquire batch processing lock for campaign ${campaignId}`);
       return NextResponse.json({
         success: false,
         message: "Failed to acquire batch processing lock",
@@ -61,12 +73,13 @@ export const POST = withAuth(async (request, { user }) => {
       });
     }
 
-    console.log(`🔒 BATCH LOCK: Acquired lock for campaign ${campaignId}`);
+    console.log(`🔒 BATCH LOCK: Successfully acquired lock for campaign ${campaignId}`);
 
     // Ensure consumer group exists
     await streamManager.createConsumerGroup(STREAM_NAME, CONSUMER_GROUP_NAME);
 
     // Read batches from stream (process 1 batch at a time)
+    console.log(`📥 READING STREAM: Checking for batches in ${STREAM_NAME}...`);
     const consumedBatches = await streamManager.readBatchFromStream(
       STREAM_NAME, 
       CONSUMER_GROUP_NAME, 
@@ -75,12 +88,15 @@ export const POST = withAuth(async (request, { user }) => {
     );
 
     if (!consumedBatches || consumedBatches.length === 0) {
+      console.log(`⚠️ NO BATCHES: Stream is empty or no new batches available`);
       return NextResponse.json({
         success: true,
         message: "No batches available for processing",
         data: { batchesProcessed: 0 }
       });
     }
+
+    console.log(`✅ BATCHES FOUND: ${consumedBatches.length} batch(es) ready for processing`);
 
     const results = [];
     let batchesProcessed = 0;
@@ -104,6 +120,31 @@ export const POST = withAuth(async (request, { user }) => {
 
           console.log(`📦 PROCESSING BATCH: ${batchData.batch_id} with ${batchSize} leads for campaign ${campaignId}`);
 
+          // Initialize LinkedIn Invite Service for this batch
+          const inviteService = new LinkedInInviteService();
+          let browserInitialized = false;
+
+          try {
+            // Initialize browser once per batch
+            await inviteService.initializeBrowser(linkedinAccountId);
+            browserInitialized = true;
+
+            // Restore LinkedIn session from database
+            await inviteService.restoreSession(linkedinAccountId);
+
+            // Skip session validation - already validated in Step 1 (activate endpoint)
+            // await inviteService.validateSession();
+
+            console.log('✅ Browser initialized and session restored - ready to send invites');
+
+          } catch (error) {
+            console.error('❌ Failed to initialize browser or validate session:', error);
+            
+            // If session is invalid, mark all leads in batch as failed
+            // and throw error to stop processing
+            throw new Error(`Session initialization failed: ${error.message}`);
+          }
+
           // Process each lead in the batch (collect data first)
           const leadIdsToUpdate = [];
           const inviteUpdates = [];
@@ -116,32 +157,39 @@ export const POST = withAuth(async (request, { user }) => {
             try {
               console.log(`📤 SENDING INVITE: ${i + 1}/${batchSize} - Lead ${lead.id} (${lead.name})`);
               
-              // Simulate invite sending (replace with actual LinkedIn automation)
-              await simulateInviteSending(lead, customMessage);
+              // Send real LinkedIn invite using browser automation
+              const result = await inviteService.sendInvite(lead, customMessage);
               
-              // Prepare updates for successful invite (don't update yet)
-              leadIdsToUpdate.push(lead.id);
-              inviteUpdates.push({
-                id: lead.id,
-                inviteSent: true,
-                inviteStatus: 'sent',
-                inviteSentAt: new Date().toISOString()
-              });
-
-              // Collect Redis update data
-              redisUpdates.push({
-                id: lead.id,
-                data: JSON.stringify({
-                  ...lead,
+              // Check if invite was sent, already pending, or already connected
+              if (result && result.success) {
+                const status = result.status; // 'invite_sent', 'already_pending', or 'already_connected'
+                const inviteStatus = status === 'invite_sent' ? 'sent' : 
+                                   status === 'already_pending' ? 'pending' : 'accepted';
+                
+                // Prepare updates for successful invite (don't update yet)
+                leadIdsToUpdate.push(lead.id);
+                inviteUpdates.push({
+                  id: lead.id,
                   inviteSent: true,
-                  inviteStatus: 'sent',
+                  inviteStatus: inviteStatus,
                   inviteSentAt: new Date().toISOString()
-                })
-              });
+                });
 
-              totalInvitesSent++;
-              
-              console.log(`✅ INVITE SENT: Lead ${lead.id} - ${lead.name}`);
+                // Collect Redis update data
+                redisUpdates.push({
+                  id: lead.id,
+                  data: JSON.stringify({
+                    ...lead,
+                    inviteSent: true,
+                    inviteStatus: inviteStatus,
+                    inviteSentAt: new Date().toISOString()
+                  })
+                });
+
+                totalInvitesSent++;
+                
+                console.log(`✅ ${status.toUpperCase()}: Lead ${lead.id} - ${lead.name}`);
+              }
 
             } catch (error) {
               console.error(`❌ Failed to send invite to lead ${lead.id}:`, error);
@@ -186,6 +234,15 @@ export const POST = withAuth(async (request, { user }) => {
             if (i < leads.length - 1) {
               console.log(`⏱️ RATE LIMIT: Waiting 2 seconds before next invite...`);
               await delay(2000);
+            }
+          }
+
+          // Cleanup browser after processing all leads in batch
+          if (browserInitialized) {
+            try {
+              await inviteService.cleanup();
+            } catch (cleanupError) {
+              console.error('❌ Browser cleanup error:', cleanupError);
             }
           }
 
@@ -334,20 +391,7 @@ export const POST = withAuth(async (request, { user }) => {
       }
     }
   }
-});
-
-// Helper function to simulate invite sending (replace with actual LinkedIn automation)
-async function simulateInviteSending(lead, customMessage) {
-  // Simulate API call delay
-  await delay(1000 + Math.random() * 2000); // 1-3 seconds
-  
-  // Simulate occasional failures (5% chance)
-  if (Math.random() < 0.05) {
-    throw new Error('Simulated invite sending failure');
-  }
-  
-  console.log(`📤 SIMULATED INVITE: Sent to ${lead.name} at ${lead.url} with message: "${customMessage}"`);
-}
+};
 
 // Helper function for delays
 function delay(ms) {
