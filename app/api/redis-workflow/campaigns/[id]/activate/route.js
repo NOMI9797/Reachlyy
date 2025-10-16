@@ -344,69 +344,26 @@ async function processInvitesDirectly(context, page, leads, customMessage, campa
       
       console.log(`✅ Modal visible`);
       
-      // Send invite (with or without note)
-      if (customMessage) {
-        try {
-          const addNoteBtn = page.locator('button:has-text("Add a note")').first();
-          if (await addNoteBtn.isVisible()) {
-            console.log(`📝 Adding custom message...`);
-            await addNoteBtn.click();
-            await page.waitForTimeout(1000);
-            
-            const textarea = page.locator('textarea[name="message"]').first();
-            await textarea.fill(customMessage);
-            await page.waitForTimeout(500);
-            
-            console.log(`📨 Sending invitation with note...`);
-            const sendBtn = page.locator('button:has-text("Send")').first();
-            await sendBtn.click();
-            await page.waitForTimeout(2000);
-            
-            results.sent++;
-            await updateLeadStatus(campaignId, lead.id, 'sent', true);
-            console.log(`✅ INVITE SENT: ${lead.name} (with note)`);
-          } else {
-            console.log(`⚠️ Add note button not found, sending without note`);
-            const sendWithoutNoteBtn = page.locator('button:has-text("Send without a note")').first();
-            if (await sendWithoutNoteBtn.isVisible()) {
-              await sendWithoutNoteBtn.click();
-              await page.waitForTimeout(2000);
-              
-              results.sent++;
-              await updateLeadStatus(campaignId, lead.id, 'sent', true);
-              console.log(`✅ INVITE SENT: ${lead.name} (without note)`);
-            } else {
-              console.log(`❌ No send buttons found`);
-              results.failed++;
-              results.errors.push({ leadId: lead.id, name: lead.name, error: 'No send buttons found in modal' });
-            }
-          }
-        } catch (e) {
-          console.log(`❌ Error handling modal:`, e.message);
+      // Always send without a note
+      try {
+        const sendWithoutNoteBtn = page.locator('button:has-text("Send without a note")').first();
+        if (await sendWithoutNoteBtn.isVisible()) {
+          console.log(`📨 Sending invitation without note...`);
+          await sendWithoutNoteBtn.click();
+          await page.waitForTimeout(2000);
+          
+          results.sent++;
+          await updateLeadStatus(campaignId, lead.id, 'sent', true);
+          console.log(`✅ INVITE SENT: ${lead.name} (without note)`);
+        } else {
+          console.log(`❌ Send without note button not found`);
           results.failed++;
-          results.errors.push({ leadId: lead.id, name: lead.name, error: `Modal error: ${e.message}` });
+          results.errors.push({ leadId: lead.id, name: lead.name, error: 'Send without note button not found' });
         }
-      } else {
-        try {
-          const sendWithoutNoteBtn = page.locator('button:has-text("Send without a note")').first();
-          if (await sendWithoutNoteBtn.isVisible()) {
-            console.log(`📨 Sending invitation without note...`);
-            await sendWithoutNoteBtn.click();
-            await page.waitForTimeout(2000);
-            
-            results.sent++;
-            await updateLeadStatus(campaignId, lead.id, 'sent', true);
-            console.log(`✅ INVITE SENT: ${lead.name} (without note)`);
-          } else {
-            console.log(`❌ Send without note button not found`);
-            results.failed++;
-            results.errors.push({ leadId: lead.id, name: lead.name, error: 'Send without note button not found' });
-          }
-        } catch (e) {
-          console.log(`❌ Error handling modal:`, e.message);
-          results.failed++;
-          results.errors.push({ leadId: lead.id, name: lead.name, error: `Modal error: ${e.message}` });
-        }
+      } catch (e) {
+        console.log(`❌ Error handling modal:`, e.message);
+        results.failed++;
+        results.errors.push({ leadId: lead.id, name: lead.name, error: `Modal error: ${e.message}` });
       }
 
       // Rate limiting: 2 seconds between invites
