@@ -39,30 +39,117 @@ async function updateLeadStatus(campaignId, leadId, inviteStatus, inviteSent) {
 }
 
 /**
- * Find Connect button using multiple selectors
+ * Find Connect button using multiple strategies with improved timing
  */
 async function findConnectButton(page) {
+  console.log(`🔍 DEBUG: Starting Connect button search...`);
+  
+  // Strategy 1: Wait for profile to fully load first
+  try {
+    console.log(`⏳ Waiting for profile page to stabilize...`);
+    
+    // Wait for multiple possible containers
+    await Promise.race([
+      page.waitForSelector('.scaffold-layout__main', { timeout: 10000 }),
+      page.waitForSelector('.ph5', { timeout: 10000 }),
+      page.waitForSelector('main.scaffold-layout__main', { timeout: 10000 })
+    ]).catch(() => console.log('⚠️ Main container timeout, continuing...'));
+    
+    // Wait for network to be idle (important for dynamic content)
+    await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {
+      console.log('⚠️ Network idle timeout, continuing...');
+    });
+    
+    // Extra wait for LinkedIn's React to render
+    await page.waitForTimeout(2000);
+    
+  } catch (e) {
+    console.log(`⚠️ Page stabilization warning:`, e.message);
+  }
+
+  // Strategy 2: Improved selectors with better specificity
   const connectSelectors = [
-    'button:has-text("Connect")',
+    // Primary selectors (most reliable)
+    'button:has(span.artdeco-button__text:text-is("Connect"))',
+    'button:has(span.artdeco-button__text)',
+    
+    // Aria-label based (very reliable)
     'button[aria-label*="Invite"][aria-label*="connect"]',
-    'button[aria-label*="Connect"]',
-    'button.pvs-profile-actions__action:has-text("Connect")',
-    'button[data-control-name="connect"]'
+    'button[aria-label*="Connect with"]',
+    
+    // Text-based with flexibility
+    'button.artdeco-button:has-text("Connect")',
+    'button:text-is("Connect")',
+    
+    // Container-specific
+    'div.pvs-profile-actions button:has-text("Connect")',
+    'div[class*="profile-actions"] button:has-text("Connect")',
+    
+    // Fallback generic
+    'button:has(span:text("Connect"))',
+    'button span.artdeco-button__text'
   ];
 
-  for (const selector of connectSelectors) {
+  // Strategy 3: Try each selector with proper error handling
+  for (let i = 0; i < connectSelectors.length; i++) {
+    const selector = connectSelectors[i];
+    console.log(`🔍 Attempt ${i + 1}/${connectSelectors.length}: ${selector}`);
+    
     try {
-      const button = await page.waitForSelector(selector, { timeout: 3000 });
-      if (button) {
-        console.log(`✅ Found Connect button with selector: ${selector}`);
-        return button;
+      const buttons = await page.locator(selector).all();
+      
+      if (buttons.length > 0) {
+        console.log(`📋 Found ${buttons.length} button(s) matching selector`);
+        
+        // Verify each button
+        for (const button of buttons) {
+          try {
+            // Check if button is visible
+            const isVisible = await button.isVisible();
+            if (!isVisible) {
+              console.log(`⚠️ Button found but not visible, skipping...`);
+              continue;
+            }
+            
+            // Get button text (handle multiple possible structures)
+            const buttonHandle = await button.elementHandle();
+            const buttonText = await buttonHandle.evaluate(el => {
+              // Try span.artdeco-button__text first
+              const span = el.querySelector('span.artdeco-button__text');
+              if (span) return span.textContent?.trim();
+              
+              // Fallback to button text
+              return el.textContent?.trim();
+            });
+            
+            console.log(`🔍 Button text: "${buttonText}"`);
+            
+            // Flexible text matching (handles whitespace, case)
+            if (buttonText && buttonText.toLowerCase().includes('connect')) {
+              // Exclude unwanted buttons
+              if (buttonText.toLowerCase().includes('message') || 
+                  buttonText.toLowerCase().includes('pending') ||
+                  buttonText.toLowerCase().includes('follow')) {
+                console.log(`⚠️ SKIPPED: Button is "${buttonText}", not Connect`);
+                continue;
+              }
+              
+              console.log(`✅ SUCCESS: Verified Connect button with: ${selector}`);
+              return button;
+            }
+          } catch (evalError) {
+            console.log(`⚠️ Button evaluation error:`, evalError.message);
+            continue;
+          }
+        }
       }
     } catch (e) {
-      // Try next selector
+      console.log(`❌ Selector ${i + 1} error:`, e.message);
       continue;
     }
   }
-
+  
+  console.log(`❌ No Connect button found after all strategies`);
   return null;
 }
 
@@ -89,37 +176,101 @@ async function processInvitesDirectly(context, page, leads, customMessage, campa
       console.log(`📤 INVITE ${i + 1}/${leads.length}: Processing ${lead.name}`);
       console.log(`🔗 Navigating to: ${lead.url}`);
       
-      // Navigate to lead profile
-      await page.goto(lead.url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-      await page.waitForTimeout(2000);
+      // Navigate with better error handling
+      try {
+        await page.goto(lead.url, { 
+          waitUntil: 'domcontentloaded', 
+          timeout: 45000 // Increased timeout
+        });
+      } catch (navError) {
+        console.log(`❌ Navigation failed:`, navError.message);
+        results.failed++;
+        results.errors.push({ 
+          leadId: lead.id, 
+          name: lead.name, 
+          error: `Navigation failed: ${navError.message}` 
+        });
+        continue;
+      }
+      
+      // Wait for page to fully load
+      await page.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => {});
+      await page.waitForTimeout(3000); // Allow React to render
 
       const currentUrl = page.url();
-      const pageTitle = await page.title();
-      console.log(`✅ Reached: ${currentUrl}`);
-      console.log(`📄 Title: ${pageTitle}`);
+      console.log(`✅ Current URL: ${currentUrl}`);
 
-      // Check buttons
-      console.log(`🔍 Searching for Connect/Pending/Message buttons...`);
-      const pendingButton = await page.$('button:has-text("Pending")');
-      const messageButton = await page.$('button:has-text("Message")');
+      // Take debug screenshot
+      const screenshotPath = `./debug-profile-${lead.id}-${Date.now()}.png`;
+      await page.screenshot({ path: screenshotPath, fullPage: false });
+      console.log(`📸 Screenshot: ${screenshotPath}`);
+
+      // Check connection status in correct order
+      console.log(`🔍 Checking connection status...`);
       
-      if (pendingButton) {
-        console.log(`⏳ ALREADY PENDING: ${lead.name}`);
-        results.alreadyPending++;
-        await updateLeadStatus(campaignId, lead.id, 'pending', true);
-        continue;
+      // 1. Check Pending first
+      try {
+        const pendingButton = page.locator('button:has-text("Pending")').first();
+        if (await pendingButton.isVisible()) {
+          console.log(`⏳ ALREADY PENDING: ${lead.name}`);
+          results.alreadyPending++;
+          await updateLeadStatus(campaignId, lead.id, 'pending', true);
+          continue;
+        }
+      } catch (e) {
+        // No pending button found, continue
       }
       
-      if (messageButton) {
-        console.log(`✅ ALREADY CONNECTED: ${lead.name}`);
-        results.alreadyConnected++;
-        await updateLeadStatus(campaignId, lead.id, 'accepted', true);
-        continue;
+      // 2. Check Message button (already connected)
+      try {
+        const messageButton = page.locator('button:has-text("Message")').first();
+        if (await messageButton.isVisible()) {
+          console.log(`✅ ALREADY CONNECTED: ${lead.name}`);
+          results.alreadyConnected++;
+          await updateLeadStatus(campaignId, lead.id, 'accepted', true);
+          continue;
+        }
+      } catch (e) {
+        // No message button found, continue
       }
-
-      // Find and click Connect button
+      
+      // 3. Find Connect button
       const connectButton = await findConnectButton(page);
+      
       if (!connectButton) {
+        // DEBUG: Inspect all buttons on the page
+        console.log(`🔍 DEBUG: Inspecting all buttons on page...`);
+        
+        try {
+          const buttonInfo = await page.evaluate(() => {
+            const buttons = Array.from(document.querySelectorAll('button'));
+            return buttons.slice(0, 15).map(btn => ({
+              text: btn.textContent?.trim().substring(0, 50),
+              ariaLabel: btn.getAttribute('aria-label'),
+              className: btn.className,
+              dataControl: btn.getAttribute('data-control-name'),
+              id: btn.id
+            }));
+          });
+          
+          console.log(`📋 Found ${buttonInfo.length} buttons on page:`);
+          buttonInfo.forEach((btn, idx) => {
+            console.log(`  Button ${idx + 1}:`, JSON.stringify(btn));
+          });
+        } catch (evalError) {
+          console.log(`⚠️ Failed to inspect buttons:`, evalError.message);
+        }
+        
+        // No Connect button - check if already connected via Message button
+        const messageButton = await page.$('button:has-text("Message")');
+        if (messageButton) {
+          console.log(`✅ ALREADY CONNECTED: ${lead.name} (only Message button found)`);
+          results.alreadyConnected++;
+          await updateLeadStatus(campaignId, lead.id, 'accepted', true);
+          continue;
+        }
+        
+        // No Connect, no Message = error
         console.log(`❌ NO CONNECT BUTTON: ${lead.name}`);
         results.failed++;
         results.errors.push({ leadId: lead.id, name: lead.name, error: 'Connect button not found' });
@@ -127,37 +278,135 @@ async function processInvitesDirectly(context, page, leads, customMessage, campa
         continue;
       }
 
-      // Click Connect button
+      // Click Connect button with retry logic
       console.log(`🔘 Clicking Connect button...`);
-      await connectButton.click();
-      await page.waitForTimeout(2000);
       
-      // Check if "Add a note" modal appears
-      const noteButton = await page.$('button[aria-label*="Add a note"]');
-      if (noteButton && customMessage) {
-        console.log(`📝 Adding custom message...`);
-        await noteButton.click();
-        await page.waitForTimeout(1000);
-        const textarea = await page.$('textarea[name="message"]');
-        if (textarea) {
-          await textarea.fill(customMessage);
-          await page.waitForTimeout(500);
+      let clickSuccess = false;
+      const clickStrategies = [
+        async () => await connectButton.click({ timeout: 5000 }),
+        async () => await connectButton.click({ force: true, timeout: 5000 }),
+        async () => {
+          const handle = await connectButton.elementHandle();
+          return await handle.evaluate(btn => btn.click());
+        }
+      ];
+      
+      for (const clickFn of clickStrategies) {
+        try {
+          await clickFn();
+          clickSuccess = true;
+          console.log(`✅ Connect button clicked successfully`);
+          break;
+        } catch (clickError) {
+          console.log(`⚠️ Click attempt failed:`, clickError.message);
         }
       }
-
-      // Send invitation
-      const sendButton = await page.$('button:has-text("Send")');
-      if (sendButton) {
-        console.log(`📨 Sending invitation...`);
-        await sendButton.click();
-        await page.waitForTimeout(2000);
-        results.sent++;
-        await updateLeadStatus(campaignId, lead.id, 'sent', true);
-        console.log(`✅ INVITE SENT: ${lead.name}`);
-      } else {
-        console.log(`❌ NO SEND BUTTON: ${lead.name}`);
+      
+      if (!clickSuccess) {
+        console.log(`❌ All click attempts failed`);
         results.failed++;
-        results.errors.push({ leadId: lead.id, name: lead.name, error: 'Send button not found' });
+        results.errors.push({ 
+          leadId: lead.id, 
+          name: lead.name, 
+          error: 'Failed to click Connect button' 
+        });
+        continue;
+      }
+      
+      // Wait for modal
+      await page.waitForTimeout(3000);
+      
+      // Take screenshot AFTER clicking to see if modal appeared
+      const modalScreenshotPath = `./debug-modal-${lead.id}.png`;
+      await page.screenshot({ path: modalScreenshotPath, fullPage: true });
+      console.log(`📸 Modal screenshot saved: ${modalScreenshotPath}`);
+      
+      // Handle invitation modal
+      console.log(`🔍 Looking for invitation modal...`);
+      
+      let modalVisible = false;
+      try {
+        modalVisible = await page.locator('div[role="dialog"]').isVisible();
+      } catch (e) {
+        console.log(`⚠️ Modal check error:`, e.message);
+      }
+      
+      if (!modalVisible) {
+        console.log(`❌ Modal did not appear`);
+        results.failed++;
+        results.errors.push({ 
+          leadId: lead.id, 
+          name: lead.name, 
+          error: 'Invitation modal did not appear' 
+        });
+        continue;
+      }
+      
+      console.log(`✅ Modal visible`);
+      
+      // Send invite (with or without note)
+      if (customMessage) {
+        try {
+          const addNoteBtn = page.locator('button:has-text("Add a note")').first();
+          if (await addNoteBtn.isVisible()) {
+            console.log(`📝 Adding custom message...`);
+            await addNoteBtn.click();
+            await page.waitForTimeout(1000);
+            
+            const textarea = page.locator('textarea[name="message"]').first();
+            await textarea.fill(customMessage);
+            await page.waitForTimeout(500);
+            
+            console.log(`📨 Sending invitation with note...`);
+            const sendBtn = page.locator('button:has-text("Send")').first();
+            await sendBtn.click();
+            await page.waitForTimeout(2000);
+            
+            results.sent++;
+            await updateLeadStatus(campaignId, lead.id, 'sent', true);
+            console.log(`✅ INVITE SENT: ${lead.name} (with note)`);
+          } else {
+            console.log(`⚠️ Add note button not found, sending without note`);
+            const sendWithoutNoteBtn = page.locator('button:has-text("Send without a note")').first();
+            if (await sendWithoutNoteBtn.isVisible()) {
+              await sendWithoutNoteBtn.click();
+              await page.waitForTimeout(2000);
+              
+              results.sent++;
+              await updateLeadStatus(campaignId, lead.id, 'sent', true);
+              console.log(`✅ INVITE SENT: ${lead.name} (without note)`);
+            } else {
+              console.log(`❌ No send buttons found`);
+              results.failed++;
+              results.errors.push({ leadId: lead.id, name: lead.name, error: 'No send buttons found in modal' });
+            }
+          }
+        } catch (e) {
+          console.log(`❌ Error handling modal:`, e.message);
+          results.failed++;
+          results.errors.push({ leadId: lead.id, name: lead.name, error: `Modal error: ${e.message}` });
+        }
+      } else {
+        try {
+          const sendWithoutNoteBtn = page.locator('button:has-text("Send without a note")').first();
+          if (await sendWithoutNoteBtn.isVisible()) {
+            console.log(`📨 Sending invitation without note...`);
+            await sendWithoutNoteBtn.click();
+            await page.waitForTimeout(2000);
+            
+            results.sent++;
+            await updateLeadStatus(campaignId, lead.id, 'sent', true);
+            console.log(`✅ INVITE SENT: ${lead.name} (without note)`);
+          } else {
+            console.log(`❌ Send without note button not found`);
+            results.failed++;
+            results.errors.push({ leadId: lead.id, name: lead.name, error: 'Send without note button not found' });
+          }
+        } catch (e) {
+          console.log(`❌ Error handling modal:`, e.message);
+          results.failed++;
+          results.errors.push({ leadId: lead.id, name: lead.name, error: `Modal error: ${e.message}` });
+        }
       }
 
       // Rate limiting: 2 seconds between invites
@@ -671,3 +920,4 @@ async function testLinkedInSession(sessionData, keepOpen = false) {
     };
   }
 }
+
