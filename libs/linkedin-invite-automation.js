@@ -36,7 +36,217 @@ async function waitForPageStabilization(page) {
 }
 
 /**
+ * Get the profile header container (where action buttons are)
+ * This ensures we only search for Connect button in the profile header, not sidebar
+ * @param {Page} page - Playwright page object
+ * @returns {Promise<Locator|null>} - Profile header container or null
+ */
+async function getProfileHeaderContainer(page) {
+  console.log(`🔍 Finding profile header container...`);
+  
+  // Multiple possible selectors for the profile header/actions area
+  const headerSelectors = [
+    '.pv-top-card', // Most common - profile top card
+    '.scaffold-layout__main .pv-top-card',
+    'section.artdeco-card.pv-top-card',
+    '.profile-background-image ~ div', // Container after background image
+    'main .ph5', // Main content area
+    '.scaffold-layout__main section:first-of-type' // First section in main layout
+  ];
+  
+  for (const selector of headerSelectors) {
+    try {
+      const container = page.locator(selector).first();
+      if (await container.isVisible({ timeout: 3000 })) {
+        console.log(`✅ Found profile header with: ${selector}`);
+        return container;
+      }
+    } catch (e) {
+      continue;
+    }
+  }
+  
+  console.log(`⚠️ Profile header not found, will search entire page (less accurate)`);
+  return null;
+}
+
+/**
+ * Find Connect button in "More" dropdown
+ * @param {Page} page - Playwright page object
+ * @param {Locator|null} profileHeader - Profile header container (optional)
+ * @returns {Promise<Locator|null>} - Connect button locator or null
+ */
+async function findConnectButtonInDropdown(page, profileHeader = null) {
+  console.log(`🔍 Looking for Connect button in "More" dropdown...`);
+  
+  try {
+    // Define search context (profile header or entire page)
+    const searchContext = profileHeader || page;
+    
+    // Find the "More" button using multiple selectors
+    const moreButtonSelectors = [
+      'button[aria-label*="More actions"]',
+      'button.artdeco-dropdown__trigger:has-text("More")',
+      'button:has-text("More")',
+      'button[id*="profile-overflow"]'
+    ];
+    
+    let moreButton = null;
+    
+    for (const selector of moreButtonSelectors) {
+      try {
+        const btn = searchContext.locator(selector).first();
+        if (await btn.isVisible({ timeout: 3000 })) {
+          moreButton = btn;
+          console.log(`✅ Found "More" button with selector: ${selector}`);
+          break;
+        }
+      } catch (e) {
+        continue;
+      }
+    }
+    
+    if (!moreButton) {
+      console.log(`⚠️ "More" button not found in profile header`);
+      return null;
+    }
+    
+    // Click the "More" button to open dropdown
+    console.log(`🔘 Clicking "More" button to open dropdown...`);
+    
+    try {
+      await moreButton.click();
+      await page.waitForTimeout(2000); // Increased wait time
+      console.log(`✅ "More" dropdown clicked`);
+    } catch (clickError) {
+      console.log(`❌ Failed to click "More" button:`, clickError.message);
+      return null;
+    }
+    
+    // DEBUG: Take screenshot to see if dropdown opened
+    const dropdownScreenshot = `./debug-dropdown-opened-${Date.now()}.png`;
+    await page.screenshot({ path: dropdownScreenshot, fullPage: false });
+    console.log(`📸 Dropdown screenshot: ${dropdownScreenshot}`);
+    
+    // Wait for dropdown content to render
+    try {
+      await page.waitForSelector('.artdeco-dropdown__content:visible, [role="menu"]:visible', { timeout: 3000 });
+      console.log(`✅ Dropdown content rendered`);
+    } catch (e) {
+      console.log(`⚠️ Dropdown content selector not found (might still be there)`);
+    }
+    
+    // DEBUG: Log all dropdown items
+    console.log(`📋 Inspecting dropdown items...`);
+    try {
+      const dropdownItems = await page.locator('.artdeco-dropdown__item, [role="menuitem"], div[role="button"]').all();
+      console.log(`📋 Found ${dropdownItems.length} potential dropdown items`);
+      
+      let visibleCount = 0;
+      for (let i = 0; i < Math.min(dropdownItems.length, 10); i++) {
+        const item = dropdownItems[i];
+        try {
+          if (await item.isVisible({ timeout: 500 })) {
+            visibleCount++;
+            const text = await item.textContent().catch(() => '');
+            const ariaLabel = await item.getAttribute('aria-label').catch(() => '');
+            console.log(`  📋 Item ${visibleCount}: text="${text?.trim()}", aria="${ariaLabel}"`);
+          }
+        } catch (e) {
+          continue;
+        }
+      }
+      
+      if (visibleCount === 0) {
+        console.log(`⚠️ No visible dropdown items found - dropdown might not have opened`);
+      }
+    } catch (e) {
+      console.log(`⚠️ Could not inspect dropdown items:`, e.message);
+    }
+    
+    // Try simplified selectors to find Connect
+    console.log(`🔍 Searching for Connect option in dropdown...`);
+    
+    const dropdownConnectSelectors = [
+      // Very simple - just text (most reliable)
+      'span:text-is("Connect")',
+      'div:has-text("Connect")',
+      
+      // Dropdown specific
+      '.artdeco-dropdown__item:has-text("Connect")',
+      '.artdeco-dropdown__item span:text-is("Connect")',
+      
+      // Role-based
+      '[role="menuitem"]:has-text("Connect")',
+      'div[role="button"]:has-text("Connect")',
+      
+      // From user's HTML
+      'span.display-flex:text-is("Connect")',
+      'span[aria-hidden="true"]:text-is("Connect")',
+      
+      // Aria-label based (best for verification)
+      'div[aria-label*="Invite"]',
+      'div[aria-label*="Invite"][aria-label*="connect"]'
+    ];
+    
+    for (const selector of dropdownConnectSelectors) {
+      try {
+        console.log(`🔍 Trying dropdown selector: ${selector}`);
+        
+        const elements = await page.locator(selector).all();
+        
+        for (const element of elements) {
+          try {
+            if (await element.isVisible({ timeout: 1000 })) {
+              const text = await element.textContent().catch(() => '');
+              const ariaLabel = await element.getAttribute('aria-label').catch(() => '');
+              
+              console.log(`   Found visible element: text="${text?.trim()}", aria="${ariaLabel}"`);
+              
+              // Check if this is Connect
+              if (text.trim().toLowerCase() === 'connect' || 
+                  (ariaLabel && ariaLabel.toLowerCase().includes('invite') && ariaLabel.toLowerCase().includes('connect'))) {
+                
+                // Try to find clickable parent
+                try {
+                  const parent = element.locator('xpath=ancestor::div[@role="button" or contains(@class, "dropdown__item")]').first();
+                  if (await parent.isVisible()) {
+                    console.log(`✅ Found Connect option (clickable parent)`);
+                    return parent;
+                  }
+                } catch (e) {
+                  // If no parent, return element itself
+                  console.log(`✅ Found Connect option (element itself)`);
+                  return element;
+                }
+              }
+            }
+          } catch (e) {
+            continue;
+          }
+        }
+      } catch (e) {
+        console.log(`⚠️ Selector "${selector}" error:`, e.message);
+        continue;
+      }
+    }
+    
+    console.log(`⚠️ Connect option not found in dropdown`);
+    return null;
+    
+  } catch (error) {
+    console.log(`❌ Error finding Connect in dropdown:`, error.message);
+    return null;
+  }
+}
+
+/**
  * Find Connect button using multiple strategies
+ * Strategy 1: Direct Connect button on profile
+ * Strategy 2: Connect button hidden in "More" dropdown
+ * 
+ * IMPORTANT: Only searches within profile header to avoid sidebar Connect buttons
+ * 
  * @param {Page} page - Playwright page object
  * @returns {Promise<Locator|null>} - Connect button locator or null
  */
@@ -46,39 +256,46 @@ export async function findConnectButton(page) {
   // Wait for page to stabilize first
   await waitForPageStabilization(page);
 
-  // Multiple selectors ordered by reliability
-  const connectSelectors = [
+  // Get profile header container to limit search scope
+  const profileHeader = await getProfileHeaderContainer(page);
+  
+  if (profileHeader) {
+    console.log(`✅ Will search within profile header only (avoids sidebar buttons)`);
+  } else {
+    console.log(`⚠️ Profile header not found, searching entire page`);
+  }
+
+  // Define search context (profile header or entire page)
+  const searchContext = profileHeader || page;
+
+  // STRATEGY 1: Look for direct Connect button first
+  console.log(`\n🎯 STRATEGY 1: Looking for direct Connect button...`);
+  
+  const directConnectSelectors = [
     // Primary selectors (most reliable)
     'button:has(span.artdeco-button__text:text-is("Connect"))',
-    'button:has(span.artdeco-button__text)',
     
     // Aria-label based (very reliable)
     'button[aria-label*="Invite"][aria-label*="connect"]',
-    'button[aria-label*="Connect with"]',
     
     // Text-based with flexibility
     'button.artdeco-button:has-text("Connect")',
     'button:text-is("Connect")',
     
-    // Container-specific
-    'div.pvs-profile-actions button:has-text("Connect")',
-    'div[class*="profile-actions"] button:has-text("Connect")',
-    
-    // Fallback generic
-    'button:has(span:text("Connect"))',
-    'button span.artdeco-button__text'
+    // Fallback
+    'button:has(span:text("Connect"))'
   ];
 
-  // Try each selector with proper error handling
-  for (let i = 0; i < connectSelectors.length; i++) {
-    const selector = connectSelectors[i];
-    console.log(`🔍 Attempt ${i + 1}/${connectSelectors.length}: ${selector}`);
+  // Try direct connect button first
+  for (let i = 0; i < directConnectSelectors.length; i++) {
+    const selector = directConnectSelectors[i];
+    console.log(`🔍 Direct attempt ${i + 1}/${directConnectSelectors.length}: ${selector}`);
     
     try {
-      const buttons = await page.locator(selector).all();
+      const buttons = await searchContext.locator(selector).all();
       
       if (buttons.length > 0) {
-        console.log(`📋 Found ${buttons.length} button(s) matching selector`);
+        console.log(`📋 Found ${buttons.length} button(s) in profile header`);
         
         // Verify each button
         for (const button of buttons) {
@@ -113,7 +330,13 @@ export async function findConnectButton(page) {
                 continue;
               }
               
-              console.log(`✅ SUCCESS: Verified Connect button with: ${selector}`);
+              // Additional check: make sure it's not "Connected" (past tense)
+              if (buttonText.toLowerCase() === 'connected') {
+                console.log(`⚠️ SKIPPED: Button says "Connected" (already connected)`);
+                continue;
+              }
+              
+              console.log(`✅ SUCCESS (Direct): Found Connect button with: ${selector}`);
               return button;
             }
           } catch (evalError) {
@@ -123,12 +346,25 @@ export async function findConnectButton(page) {
         }
       }
     } catch (e) {
-      console.log(`❌ Selector ${i + 1} error:`, e.message);
+      console.log(`❌ Direct selector ${i + 1} error:`, e.message);
       continue;
     }
   }
   
-  console.log(`❌ No Connect button found after all strategies`);
+  console.log(`⚠️ No direct Connect button found in profile header`);
+  
+  // STRATEGY 2: Look for Connect button in "More" dropdown
+  console.log(`\n🎯 STRATEGY 2: Looking for Connect button in "More" dropdown...`);
+  
+  const connectInDropdown = await findConnectButtonInDropdown(page, profileHeader);
+  
+  if (connectInDropdown) {
+    console.log(`✅ SUCCESS (Dropdown): Found Connect button in "More" dropdown`);
+    return connectInDropdown;
+  }
+  
+  console.log(`❌ No Connect button found in dropdown either`);
+  console.log(`❌ FINAL: No Connect button found after all strategies`);
   return null;
 }
 
@@ -175,9 +411,10 @@ export async function checkConnectionStatus(page, campaignId, lead, results) {
 /**
  * Click Connect button with retry strategies
  * @param {Locator} connectButton - Playwright locator for Connect button
+ * @param {Page} page - Playwright page object
  * @returns {Promise<boolean>} - True if click succeeded, false otherwise
  */
-export async function clickConnectButton(connectButton) {
+export async function clickConnectButton(connectButton, page) {
   console.log(`🔘 Clicking Connect button...`);
   
   const clickStrategies = [
@@ -189,13 +426,17 @@ export async function clickConnectButton(connectButton) {
     }
   ];
   
-  for (const clickFn of clickStrategies) {
+  for (let i = 0; i < clickStrategies.length; i++) {
     try {
-      await clickFn();
-      console.log(`✅ Connect button clicked successfully`);
+      await clickStrategies[i]();
+      console.log(`✅ Connect button clicked successfully (strategy ${i + 1})`);
+      
+      // If we clicked from dropdown, wait a bit longer for modal
+      await page.waitForTimeout(2000);
+      
       return true;
     } catch (clickError) {
-      console.log(`⚠️ Click attempt failed:`, clickError.message);
+      console.log(`⚠️ Click attempt ${i + 1} failed:`, clickError.message);
     }
   }
   
@@ -254,18 +495,24 @@ async function inspectPageButtons(page) {
   try {
     const buttonInfo = await page.evaluate(() => {
       const buttons = Array.from(document.querySelectorAll('button'));
-      return buttons.slice(0, 15).map(btn => ({
+      return buttons.slice(0, 20).map(btn => ({
         text: btn.textContent?.trim().substring(0, 50),
         ariaLabel: btn.getAttribute('aria-label'),
-        className: btn.className,
+        className: btn.className.substring(0, 100),
         dataControl: btn.getAttribute('data-control-name'),
-        id: btn.id
+        id: btn.id,
+        visible: btn.offsetParent !== null
       }));
     });
     
     console.log(`📋 Found ${buttonInfo.length} buttons on page:`);
     buttonInfo.forEach((btn, idx) => {
-      console.log(`  Button ${idx + 1}:`, JSON.stringify(btn));
+      if (btn.text?.toLowerCase().includes('connect') || 
+          btn.text?.toLowerCase().includes('more') ||
+          btn.ariaLabel?.toLowerCase().includes('connect') ||
+          btn.ariaLabel?.toLowerCase().includes('more')) {
+        console.log(`  🎯 POTENTIAL: Button ${idx + 1}:`, JSON.stringify(btn));
+      }
     });
   } catch (evalError) {
     console.log(`⚠️ Failed to inspect buttons:`, evalError.message);
@@ -299,8 +546,10 @@ export async function processInvitesDirectly(context, page, leads, customMessage
     const lead = leads[i];
     
     try {
+      console.log(`\n${'='.repeat(60)}`);
       console.log(`📤 INVITE ${i + 1}/${leads.length}: Processing ${lead.name}`);
       console.log(`🔗 Navigating to: ${lead.url}`);
+      console.log(`${'='.repeat(60)}`);
       
       // Navigate with better error handling
       try {
@@ -337,23 +586,28 @@ export async function processInvitesDirectly(context, page, leads, customMessage
         continue;
       }
       
-      // Find Connect button
+      // Find Connect button (tries direct button first, then dropdown)
       const connectButton = await findConnectButton(page);
       
       if (!connectButton) {
         // Debug: Inspect all buttons
         await inspectPageButtons(page);
         
-        // No Connect, no Message = error
+        // No Connect button found anywhere
         console.log(`❌ NO CONNECT BUTTON: ${lead.name}`);
         results.failed++;
-        results.errors.push({ leadId: lead.id, name: lead.name, error: 'Connect button not found' });
+        results.errors.push({ leadId: lead.id, name: lead.name, error: 'Connect button not found (direct or dropdown)' });
         await updateLeadStatus(campaignId, lead.id, 'failed', false);
         continue;
       }
 
+      // Take screenshot before clicking
+      const beforeClickPath = `./debug-before-click-${lead.id}-${Date.now()}.png`;
+      await page.screenshot({ path: beforeClickPath, fullPage: false });
+      console.log(`📸 Before-click screenshot: ${beforeClickPath}`);
+
       // Click Connect button
-      const clickSuccess = await clickConnectButton(connectButton);
+      const clickSuccess = await clickConnectButton(connectButton, page);
       
       if (!clickSuccess) {
         results.failed++;
@@ -365,13 +619,13 @@ export async function processInvitesDirectly(context, page, leads, customMessage
         continue;
       }
       
-      // Wait for modal
+      // Wait for modal to appear
       await page.waitForTimeout(3000);
       
       // Take screenshot AFTER clicking to see if modal appeared
-      const modalScreenshotPath = `./debug-modal-${lead.id}.png`;
+      const modalScreenshotPath = `./debug-modal-${lead.id}-${Date.now()}.png`;
       await page.screenshot({ path: modalScreenshotPath, fullPage: true });
-      console.log(`📸 Modal screenshot saved: ${modalScreenshotPath}`);
+      console.log(`📸 Modal screenshot: ${modalScreenshotPath}`);
       
       // Handle invitation modal
       const inviteSent = await handleInviteModal(page);
@@ -386,10 +640,10 @@ export async function processInvitesDirectly(context, page, leads, customMessage
         await updateLeadStatus(campaignId, lead.id, 'failed', false);
       }
 
-      // Rate limiting: 2 seconds between invites
+      // Rate limiting: 3 seconds between invites
       if (i < leads.length - 1) {
-        console.log(`⏱️ Waiting 2 seconds before next invite...`);
-        await page.waitForTimeout(2000);
+        console.log(`⏱️ Waiting 3 seconds before next invite...`);
+        await page.waitForTimeout(3000);
       }
 
     } catch (error) {
@@ -400,13 +654,15 @@ export async function processInvitesDirectly(context, page, leads, customMessage
     }
   }
 
+  console.log(`\n${'='.repeat(60)}`);
   console.log(`🎉 INVITE PROCESSING COMPLETE`);
+  console.log(`${'='.repeat(60)}`);
   console.log(`   Total: ${results.total}`);
   console.log(`   Sent: ${results.sent}`);
   console.log(`   Already Connected: ${results.alreadyConnected}`);
   console.log(`   Already Pending: ${results.alreadyPending}`);
   console.log(`   Failed: ${results.failed}`);
+  console.log(`${'='.repeat(60)}\n`);
 
   return results;
 }
-
