@@ -106,13 +106,30 @@ export async function fetchEligibleLeads(campaignId) {
     console.log(`✅ Fetched ${allLeads.length} leads from Redis cache`);
   }
   
-  // Filter leads that need invites (completed, not sent yet, pending or failed status)
-  const eligibleLeads = allLeads.filter((lead) =>
-    lead.status === "completed" && 
-    lead.status !== "error" &&
-    (!lead.inviteSent || lead.inviteSent === false) &&
-    (lead.inviteStatus === 'pending' || lead.inviteStatus === 'failed' || !lead.inviteStatus)
-  );
+  // Filter leads that need invites (independent of post scraping)
+  // Only check: has URL, invite not sent, status is eligible
+  // Note: Name is optional - we only need the LinkedIn URL to send invites
+  console.log(`🔍 Filtering ${allLeads.length} leads for eligibility...`);
+  
+  const eligibleLeads = allLeads.filter((lead) => {
+    const hasUrl = !!lead.url;
+    const hasName = !!lead.name;
+    const notSent = !lead.inviteSent || lead.inviteSent === false;
+    const eligibleStatus = lead.inviteStatus === 'pending' || lead.inviteStatus === 'failed' || !lead.inviteStatus;
+    
+    // Only require URL, not name (name is optional for display purposes)
+    const isEligible = hasUrl && notSent && eligibleStatus;
+    
+    // Debug logging for each lead
+    console.log(`🔍 Lead: ${lead.name || lead.id}`);
+    console.log(`   - Has URL: ${hasUrl} (${lead.url || 'MISSING'})`);
+    console.log(`   - Has Name: ${hasName} (${lead.name || 'MISSING'}) - OPTIONAL`);
+    console.log(`   - Not Sent: ${notSent} (inviteSent: ${lead.inviteSent})`);
+    console.log(`   - Eligible Status: ${eligibleStatus} (inviteStatus: ${lead.inviteStatus})`);
+    console.log(`   - ✅ ELIGIBLE: ${isEligible}`);
+    
+    return isEligible;
+  });
 
   return {
     allLeads,
