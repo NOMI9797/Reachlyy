@@ -77,8 +77,6 @@ async function getProfileHeaderContainer(page) {
  * @returns {Promise<Locator|null>} - Connect button locator or null
  */
 async function findConnectButtonInDropdown(page, profileHeader = null) {
-  console.log(`🔍 Looking for Connect button in "More" dropdown...`);
-  
   try {
     // Define search context (profile header or entire page)
     const searchContext = profileHeader || page;
@@ -98,7 +96,6 @@ async function findConnectButtonInDropdown(page, profileHeader = null) {
         const btn = searchContext.locator(selector).first();
         if (await btn.isVisible({ timeout: 3000 })) {
           moreButton = btn;
-          console.log(`✅ Found "More" button with selector: ${selector}`);
           break;
         }
       } catch (e) {
@@ -107,65 +104,19 @@ async function findConnectButtonInDropdown(page, profileHeader = null) {
     }
     
     if (!moreButton) {
-      console.log(`⚠️ "More" button not found in profile header`);
       return null;
     }
     
     // Click the "More" button to open dropdown
-    console.log(`🔘 Clicking "More" button to open dropdown...`);
-    
     try {
       await moreButton.click();
-      await page.waitForTimeout(2000); // Increased wait time
-      console.log(`✅ "More" dropdown clicked`);
+      await page.waitForTimeout(2000);
     } catch (clickError) {
-      console.log(`❌ Failed to click "More" button:`, clickError.message);
       return null;
     }
     
-    // DEBUG: Take screenshot to see if dropdown opened
-    const dropdownScreenshot = `./debug-dropdown-opened-${Date.now()}.png`;
-    await page.screenshot({ path: dropdownScreenshot, fullPage: false });
-    console.log(`📸 Dropdown screenshot: ${dropdownScreenshot}`);
-    
     // Wait for dropdown content to render
-    try {
-      await page.waitForSelector('.artdeco-dropdown__content:visible, [role="menu"]:visible', { timeout: 3000 });
-      console.log(`✅ Dropdown content rendered`);
-    } catch (e) {
-      console.log(`⚠️ Dropdown content selector not found (might still be there)`);
-    }
-    
-    // DEBUG: Log all dropdown items
-    console.log(`📋 Inspecting dropdown items...`);
-    try {
-      const dropdownItems = await page.locator('.artdeco-dropdown__item, [role="menuitem"], div[role="button"]').all();
-      console.log(`📋 Found ${dropdownItems.length} potential dropdown items`);
-      
-      let visibleCount = 0;
-      for (let i = 0; i < Math.min(dropdownItems.length, 10); i++) {
-        const item = dropdownItems[i];
-        try {
-          if (await item.isVisible({ timeout: 500 })) {
-            visibleCount++;
-            const text = await item.textContent().catch(() => '');
-            const ariaLabel = await item.getAttribute('aria-label').catch(() => '');
-            console.log(`  📋 Item ${visibleCount}: text="${text?.trim()}", aria="${ariaLabel}"`);
-          }
-        } catch (e) {
-          continue;
-        }
-      }
-      
-      if (visibleCount === 0) {
-        console.log(`⚠️ No visible dropdown items found - dropdown might not have opened`);
-      }
-    } catch (e) {
-      console.log(`⚠️ Could not inspect dropdown items:`, e.message);
-    }
-    
-    // Try simplified selectors to find Connect
-    console.log(`🔍 Searching for Connect option in dropdown...`);
+    await page.waitForTimeout(1000);
     
     const dropdownConnectSelectors = [
       // Very simple - just text (most reliable)
@@ -191,8 +142,6 @@ async function findConnectButtonInDropdown(page, profileHeader = null) {
     
     for (const selector of dropdownConnectSelectors) {
       try {
-        console.log(`🔍 Trying dropdown selector: ${selector}`);
-        
         const elements = await page.locator(selector).all();
         
         for (const element of elements) {
@@ -200,8 +149,6 @@ async function findConnectButtonInDropdown(page, profileHeader = null) {
             if (await element.isVisible({ timeout: 1000 })) {
               const text = await element.textContent().catch(() => '');
               const ariaLabel = await element.getAttribute('aria-label').catch(() => '');
-              
-              console.log(`   Found visible element: text="${text?.trim()}", aria="${ariaLabel}"`);
               
               // Check if this is Connect
               if (text.trim().toLowerCase() === 'connect' || 
@@ -211,12 +158,12 @@ async function findConnectButtonInDropdown(page, profileHeader = null) {
                 try {
                   const parent = element.locator('xpath=ancestor::div[@role="button" or contains(@class, "dropdown__item")]').first();
                   if (await parent.isVisible()) {
-                    console.log(`✅ Found Connect option (clickable parent)`);
+                    console.log(`✅ Found Connect option in dropdown`);
                     return parent;
                   }
                 } catch (e) {
                   // If no parent, return element itself
-                  console.log(`✅ Found Connect option (element itself)`);
+                  console.log(`✅ Found Connect option in dropdown`);
                   return element;
                 }
               }
@@ -226,16 +173,13 @@ async function findConnectButtonInDropdown(page, profileHeader = null) {
           }
         }
       } catch (e) {
-        console.log(`⚠️ Selector "${selector}" error:`, e.message);
         continue;
       }
     }
     
-    console.log(`⚠️ Connect option not found in dropdown`);
     return null;
     
   } catch (error) {
-    console.log(`❌ Error finding Connect in dropdown:`, error.message);
     return null;
   }
 }
@@ -251,120 +195,81 @@ async function findConnectButtonInDropdown(page, profileHeader = null) {
  * @returns {Promise<Locator|null>} - Connect button locator or null
  */
 export async function findConnectButton(page) {
-  console.log(`🔍 DEBUG: Starting Connect button search...`);
+  console.log(`🔍 Searching for Connect button...`);
   
   // Wait for page to stabilize first
   await waitForPageStabilization(page);
 
   // Get profile header container to limit search scope
   const profileHeader = await getProfileHeaderContainer(page);
-  
-  if (profileHeader) {
-    console.log(`✅ Will search within profile header only (avoids sidebar buttons)`);
-  } else {
-    console.log(`⚠️ Profile header not found, searching entire page`);
-  }
-
-  // Define search context (profile header or entire page)
   const searchContext = profileHeader || page;
 
   // STRATEGY 1: Look for direct Connect button first
-  console.log(`\n🎯 STRATEGY 1: Looking for direct Connect button...`);
-  
   const directConnectSelectors = [
-    // Primary selectors (most reliable)
     'button:has(span.artdeco-button__text:text-is("Connect"))',
-    
-    // Aria-label based (very reliable)
     'button[aria-label*="Invite"][aria-label*="connect"]',
-    
-    // Text-based with flexibility
     'button.artdeco-button:has-text("Connect")',
     'button:text-is("Connect")',
-    
-    // Fallback
     'button:has(span:text("Connect"))'
   ];
 
   // Try direct connect button first
   for (let i = 0; i < directConnectSelectors.length; i++) {
     const selector = directConnectSelectors[i];
-    console.log(`🔍 Direct attempt ${i + 1}/${directConnectSelectors.length}: ${selector}`);
     
     try {
       const buttons = await searchContext.locator(selector).all();
       
       if (buttons.length > 0) {
-        console.log(`📋 Found ${buttons.length} button(s) in profile header`);
-        
         // Verify each button
         for (const button of buttons) {
           try {
             // Check if button is visible
             const isVisible = await button.isVisible();
-            if (!isVisible) {
-              console.log(`⚠️ Button found but not visible, skipping...`);
-              continue;
-            }
+            if (!isVisible) continue;
             
-            // Get button text (handle multiple possible structures)
+            // Get button text
             const buttonHandle = await button.elementHandle();
             const buttonText = await buttonHandle.evaluate(el => {
-              // Try span.artdeco-button__text first
               const span = el.querySelector('span.artdeco-button__text');
               if (span) return span.textContent?.trim();
-              
-              // Fallback to button text
               return el.textContent?.trim();
             });
             
-            console.log(`🔍 Button text: "${buttonText}"`);
-            
-            // Flexible text matching (handles whitespace, case)
+            // Check if this is Connect button
             if (buttonText && buttonText.toLowerCase().includes('connect')) {
               // Exclude unwanted buttons
               if (buttonText.toLowerCase().includes('message') || 
                   buttonText.toLowerCase().includes('pending') ||
-                  buttonText.toLowerCase().includes('follow')) {
-                console.log(`⚠️ SKIPPED: Button is "${buttonText}", not Connect`);
+                  buttonText.toLowerCase().includes('follow') ||
+                  buttonText.toLowerCase() === 'connected') {
                 continue;
               }
               
-              // Additional check: make sure it's not "Connected" (past tense)
-              if (buttonText.toLowerCase() === 'connected') {
-                console.log(`⚠️ SKIPPED: Button says "Connected" (already connected)`);
-                continue;
-              }
-              
-              console.log(`✅ SUCCESS (Direct): Found Connect button with: ${selector}`);
+              console.log(`✅ Found direct Connect button`);
               return button;
             }
           } catch (evalError) {
-            console.log(`⚠️ Button evaluation error:`, evalError.message);
             continue;
           }
         }
       }
     } catch (e) {
-      console.log(`❌ Direct selector ${i + 1} error:`, e.message);
       continue;
     }
   }
   
-  console.log(`⚠️ No direct Connect button found in profile header`);
-  
   // STRATEGY 2: Look for Connect button in "More" dropdown
-  console.log(`\n🎯 STRATEGY 2: Looking for Connect button in "More" dropdown...`);
+  console.log(`🔍 Checking "More" dropdown...`);
   
   const connectInDropdown = await findConnectButtonInDropdown(page, profileHeader);
   
   if (connectInDropdown) {
-    console.log(`✅ SUCCESS (Dropdown): Found Connect button in "More" dropdown`);
+    console.log(`✅ Found Connect button in dropdown`);
     return connectInDropdown;
   }
   
-  console.log(`❌ No Connect button found in dropdown either`);
-  console.log(`❌ FINAL: No Connect button found after all strategies`);
+  console.log(`❌ Connect button not found`);
   return null;
 }
 
