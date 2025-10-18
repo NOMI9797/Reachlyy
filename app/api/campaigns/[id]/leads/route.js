@@ -193,7 +193,9 @@ export const POST = withAuth(async (request, { params, user }) => {
               company: lead.company,
               url: lead.url,
               status: lead.status,
-              hasMessage: hasMessage
+              hasMessage: hasMessage,
+              inviteSent: lead.inviteSent || false,
+              inviteStatus: lead.inviteStatus || 'pending'
             });
           });
           

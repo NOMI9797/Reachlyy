@@ -7,6 +7,9 @@
 
 import { updateLeadStatus } from './lead-status-manager';
 
+// Debug mode: Enable screenshots and verbose logging
+const DEBUG_MODE = process.env.ENABLE_DEBUG === 'true' || process.env.NODE_ENV === 'development';
+
 /**
  * Wait for LinkedIn profile page to stabilize
  * @param {Page} page - Playwright page object
@@ -15,23 +18,22 @@ async function waitForPageStabilization(page) {
   console.log(`⏳ Waiting for profile page to stabilize...`);
   
   try {
-    // Wait for multiple possible containers
+    // Wait for main container (fast check)
     await Promise.race([
-      page.waitForSelector('.scaffold-layout__main', { timeout: 10000 }),
-      page.waitForSelector('.ph5', { timeout: 10000 }),
-      page.waitForSelector('main.scaffold-layout__main', { timeout: 10000 })
-    ]).catch(() => console.log('⚠️ Main container timeout, continuing...'));
+      page.waitForSelector('.scaffold-layout__main', { timeout: 5000 }),
+      page.waitForSelector('.ph5', { timeout: 5000 }),
+      page.waitForSelector('main.scaffold-layout__main', { timeout: 5000 })
+    ]).catch(() => {});
     
-    // Wait for network to be idle (important for dynamic content)
-    await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {
-      console.log('⚠️ Network idle timeout, continuing...');
-    });
+    // OPTIMIZATION: Removed networkidle wait (LinkedIn has constant network activity)
+    // Use domcontentloaded instead - much faster
+    await page.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => {});
     
-    // Extra wait for LinkedIn's React to render
-    await page.waitForTimeout(2000);
+    // OPTIMIZATION: Reduced React render wait from 2s → 500ms
+    await page.waitForTimeout(500);
     
   } catch (e) {
-    console.log(`⚠️ Page stabilization warning:`, e.message);
+    // Silently continue - page might still be usable
   }
 }
 
@@ -473,17 +475,19 @@ export async function processInvitesDirectly(context, page, leads, customMessage
         continue;
       }
       
-      // Wait for page to fully load
+      // OPTIMIZATION: Reduced page load waits
       await page.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => {});
-      await page.waitForTimeout(3000);
+      await page.waitForTimeout(1000);  // Reduced from 3s → 1s
 
       const currentUrl = page.url();
       console.log(`✅ Current URL: ${currentUrl}`);
 
-      // Take debug screenshot
-      const screenshotPath = `./debug-profile-${lead.id}-${Date.now()}.png`;
-      await page.screenshot({ path: screenshotPath, fullPage: false });
-      console.log(`📸 Screenshot: ${screenshotPath}`);
+      // OPTIMIZATION: Take screenshot only in debug mode
+      if (DEBUG_MODE) {
+        const screenshotPath = `./debug-profile-${lead.id}-${Date.now()}.png`;
+        await page.screenshot({ path: screenshotPath, fullPage: false });
+        console.log(`📸 Screenshot: ${screenshotPath}`);
+      }
 
       // Check if already connected or pending
       const isAlreadyProcessed = await checkConnectionStatus(page, campaignId, lead, results);
@@ -506,10 +510,12 @@ export async function processInvitesDirectly(context, page, leads, customMessage
         continue;
       }
 
-      // Take screenshot before clicking
-      const beforeClickPath = `./debug-before-click-${lead.id}-${Date.now()}.png`;
-      await page.screenshot({ path: beforeClickPath, fullPage: false });
-      console.log(`📸 Before-click screenshot: ${beforeClickPath}`);
+      // OPTIMIZATION: Take screenshot only in debug mode
+      if (DEBUG_MODE) {
+        const beforeClickPath = `./debug-before-click-${lead.id}-${Date.now()}.png`;
+        await page.screenshot({ path: beforeClickPath, fullPage: false });
+        console.log(`📸 Before-click screenshot: ${beforeClickPath}`);
+      }
 
       // Click Connect button
       const clickSuccess = await clickConnectButton(connectButton, page);
@@ -524,13 +530,15 @@ export async function processInvitesDirectly(context, page, leads, customMessage
         continue;
       }
       
-      // Wait for modal to appear
-      await page.waitForTimeout(3000);
+      // OPTIMIZATION: Reduced modal wait from 3s → 1.5s
+      await page.waitForTimeout(1500);
       
-      // Take screenshot AFTER clicking to see if modal appeared
-      const modalScreenshotPath = `./debug-modal-${lead.id}-${Date.now()}.png`;
-      await page.screenshot({ path: modalScreenshotPath, fullPage: true });
-      console.log(`📸 Modal screenshot: ${modalScreenshotPath}`);
+      // OPTIMIZATION: Take screenshot only in debug mode
+      if (DEBUG_MODE) {
+        const modalScreenshotPath = `./debug-modal-${lead.id}-${Date.now()}.png`;
+        await page.screenshot({ path: modalScreenshotPath, fullPage: true });
+        console.log(`📸 Modal screenshot: ${modalScreenshotPath}`);
+      }
       
       // Handle invitation modal
       const inviteSent = await handleInviteModal(page);
@@ -545,10 +553,10 @@ export async function processInvitesDirectly(context, page, leads, customMessage
         await updateLeadStatus(campaignId, lead.id, 'failed', false);
       }
 
-      // Rate limiting: 3 seconds between invites
+      // Rate limiting: 2 seconds between invites (as requested)
       if (i < leads.length - 1) {
-        console.log(`⏱️ Waiting 3 seconds before next invite...`);
-        await page.waitForTimeout(3000);
+        console.log(`⏱️ Waiting 2 seconds before next invite...`);
+        await page.waitForTimeout(2000);
       }
 
     } catch (error) {
