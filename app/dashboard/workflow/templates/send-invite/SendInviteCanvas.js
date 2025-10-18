@@ -108,6 +108,10 @@ export default function SendInviteCanvas({ campaignName, campaignId }) {
   // Workflow state
   const [isRunning, setIsRunning] = useState(false);
   const [activationStatus, setActivationStatus] = useState(null);
+  
+  // Progress state for SSE
+  const [progress, setProgress] = useState({ current: 0, total: 0 });
+  const [isProcessing, setIsProcessing] = useState(false);
 
   const onInit = useCallback((instance) => {
     rf.current = instance;
@@ -125,7 +129,7 @@ export default function SendInviteCanvas({ campaignName, campaignId }) {
     setEdges((eds) => eds.filter((edge) => edge.source !== nodeId && edge.target !== nodeId));
   }, [setNodes, setEdges]);
 
-  // Run Workflow function - calls Step 1 activation endpoint
+  // Run Workflow function - uses SSE for real-time progress
   const handleRunWorkflow = async () => {
     if (!campaignId) {
       setActivationStatus({
@@ -137,47 +141,123 @@ export default function SendInviteCanvas({ campaignName, campaignId }) {
 
     setIsRunning(true);
     setActivationStatus(null);
+    setProgress({ current: 0, total: 0 });
+    setIsProcessing(true);
+
+    console.log(`🚀 Starting SSE workflow for campaign: ${campaignId}`);
 
     try {
-      console.log(`🚀 Starting workflow for campaign: ${campaignId}`);
-      
-      const response = await fetch(`/api/redis-workflow/campaigns/${campaignId}/activate`, {
+      const response = await fetch(`/api/redis-workflow/campaigns/${campaignId}/activate-stream`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
           customMessage: "Hi there! I'd like to connect with you.",
-          batchSize: 5
+          batchSize: 10
         })
       });
 
-      const result = await response.json();
+      console.log('📡 SSE Response:', { ok: response.ok, status: response.status });
 
-      if (result.success) {
-        setActivationStatus({
-          type: 'success',
-          message: `Workflow activated successfully! ${result.data.queue.batchesQueued} batches queued for ${result.data.leads.eligible} eligible leads.`,
-          data: result.data
-        });
-        console.log('✅ Workflow activated:', result.data);
-      } else {
-        setActivationStatus({
-          type: 'error',
-          message: result.message || 'Failed to activate workflow',
-          details: result.error
-        });
-        console.error('❌ Workflow activation failed:', result);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
       }
+
+      if (!response.body) {
+        throw new Error('Response body is null - streaming not supported');
+      }
+
+      console.log('📡 Starting to read SSE stream...');
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let eventCount = 0;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        
+        if (done) {
+          console.log('✅ SSE stream completed');
+          break;
+        }
+
+        const chunk = decoder.decode(value, { stream: true });
+        buffer += chunk;
+        const lines = buffer.split('\n\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            eventCount++;
+            const jsonData = line.slice(6);
+            
+            try {
+              const data = JSON.parse(jsonData);
+              console.log(`📡 SSE Event #${eventCount}:`, data.type, data);
+
+              if (data.type === 'start') {
+                console.log(`🎬 START: ${data.total} leads, ${data.batches} batches`);
+                setProgress({ current: 0, total: data.total });
+              } 
+              else if (data.type === 'progress') {
+                console.log(`⏳ PROGRESS: ${data.current}/${data.total} (${data.percentage}%)`);
+                setProgress({ current: data.current, total: data.total });
+              } 
+              else if (data.type === 'batch_delay') {
+                console.log(`⏱️ DELAY: Waiting ${data.delayMinutes} min before batch ${data.nextBatch}`);
+                setActivationStatus({
+                  type: 'info',
+                  message: `Waiting ${data.delayMinutes} minutes before next batch (${data.nextBatch}/${data.totalBatches})...`
+                });
+              }
+              else if (data.type === 'limit_reached') {
+                console.log(`⚠️ LIMIT REACHED: ${data.message}`);
+                setActivationStatus({
+                  type: 'warning',
+                  message: data.message,
+                  details: `${data.remaining} batches remaining. Resume tomorrow.`
+                });
+              }
+              else if (data.type === 'complete') {
+                console.log(`🎉 COMPLETE:`, data);
+                setProgress({ current: data.total, total: data.total });
+                setActivationStatus({
+                  type: 'success',
+                  message: `Workflow completed!`,
+                  details: `Sent: ${data.sent}, Already Connected: ${data.alreadyConnected}, Already Pending: ${data.alreadyPending}, Failed: ${data.failed}`
+                });
+                setIsProcessing(false);
+              } 
+              else if (data.type === 'error') {
+                console.log(`❌ ERROR:`, data.message);
+                setActivationStatus({
+                  type: 'error',
+                  message: data.message,
+                  details: data.details
+                });
+                setIsProcessing(false);
+              }
+            } catch (parseError) {
+              console.error('❌ Failed to parse SSE JSON:', parseError);
+            }
+          }
+        }
+      }
+      
+      console.log(`✅ Total SSE events: ${eventCount}`);
     } catch (error) {
+      console.error('❌ SSE Error:', error);
       setActivationStatus({
         type: 'error',
         message: 'Network error occurred while activating workflow',
         details: error.message
       });
-      console.error('❌ Workflow activation error:', error);
+      setIsProcessing(false);
     } finally {
       setIsRunning(false);
+      console.log('🏁 Workflow execution finished');
     }
   };
 
@@ -347,9 +427,45 @@ export default function SendInviteCanvas({ campaignName, campaignId }) {
           {/* Removed default ReactFlow controls to avoid bottom-left plus button */}
           <Background variant="dots" gap={18} size={1} color={isDark ? "#6b7280" : "#cbd5e1"} />
         </ReactFlow>
+        {/* Progress Bar - Compact Top-Right */}
+        {isProcessing && progress.total > 0 && (
+          <div className="absolute top-4 right-4 z-[100] w-80">
+            <div className="bg-base-100 rounded-lg shadow-xl border border-base-300 p-3">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-medium text-base-content flex items-center gap-1.5">
+                  <span className="loading loading-spinner loading-xs text-primary"></span>
+                  {progress.current === 0 && progress.total === 1 ? 'Connecting...' : 'Processing'}
+                </span>
+                <span className="text-xs font-mono font-semibold text-primary">
+                  {progress.current === 0 && progress.total === 1 
+                    ? '...' 
+                    : `${progress.current}/${progress.total} (${Math.round((progress.current / progress.total) * 100)}%)`
+                  }
+                </span>
+              </div>
+              
+              {/* Progress Bar */}
+              <div className="w-full bg-base-300 rounded-full h-2 overflow-hidden">
+                <div 
+                  className="bg-gradient-to-r from-primary to-secondary h-full rounded-full transition-all duration-300 ease-out"
+                  style={{ 
+                    width: progress.current === 0 && progress.total === 1 
+                      ? '0%' 
+                      : `${(progress.current / progress.total) * 100}%` 
+                  }}
+                />
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Status Display */}
-        {activationStatus && (
-          <div className={`absolute top-4 left-4 right-4 z-50 ${activationStatus.type === 'success' ? 'alert-success' : 'alert-error'}`}>
+        {activationStatus && !isProcessing && (
+          <div className={`absolute top-4 left-4 right-4 z-50 alert ${
+            activationStatus.type === 'success' ? 'alert-success' : 
+            activationStatus.type === 'warning' ? 'alert-warning' :
+            activationStatus.type === 'info' ? 'alert-info' : 'alert-error'
+          } shadow-xl`}>
             <AlertCircle className="h-4 w-4" />
             <div>
               <div className="font-medium">{activationStatus.message}</div>

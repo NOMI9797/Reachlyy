@@ -11,7 +11,8 @@ import { leads } from './schema';
 import { eq } from 'drizzle-orm';
 
 /**
- * Update lead status in both PostgreSQL and Redis
+ * Update lead status in Redis FIRST, then PostgreSQL
+ * This ensures cache consistency and faster status checks
  * 
  * @param {string} campaignId - Campaign ID
  * @param {string} leadId - Lead ID
@@ -20,18 +21,10 @@ import { eq } from 'drizzle-orm';
  */
 export async function updateLeadStatus(campaignId, leadId, inviteStatus, inviteSent) {
   try {
-    // Update PostgreSQL
-    await db.update(leads)
-      .set({
-        inviteSent: inviteSent,
-        inviteStatus: inviteStatus,
-        inviteSentAt: new Date()
-      })
-      .where(eq(leads.id, leadId));
-
-    // Update Redis cache
     const redis = getRedisClient();
     const leadKey = `campaign:${campaignId}:leads`;
+    
+    // STEP 1: Update Redis cache FIRST (source of truth for real-time checks)
     const leadData = await redis.hget(leadKey, leadId);
     
     if (leadData) {
@@ -40,10 +33,78 @@ export async function updateLeadStatus(campaignId, leadId, inviteStatus, inviteS
       lead.inviteStatus = inviteStatus;
       lead.inviteSentAt = new Date().toISOString();
       await redis.hset(leadKey, leadId, JSON.stringify(lead));
+    } else {
+      console.log(`⚠️ Lead ${leadId} not found in Redis cache, skipping cache update`);
     }
+    
+    // STEP 2: Update PostgreSQL (persistent storage)
+    await db.update(leads)
+      .set({
+        inviteSent: inviteSent,
+        inviteStatus: inviteStatus,
+        inviteSentAt: new Date()
+      })
+      .where(eq(leads.id, leadId));
     
   } catch (error) {
     console.error(`❌ Failed to update lead ${leadId}:`, error.message);
+    throw error; // Re-throw to allow caller to handle
+  }
+}
+
+/**
+ * Update lead status GLOBALLY across all campaigns (by URL)
+ * Use this when LinkedIn shows definitive status (Pending/Message buttons)
+ * 
+ * @param {string} leadUrl - LinkedIn profile URL
+ * @param {string} inviteStatus - Invite status (sent, accepted)
+ * @param {boolean} inviteSent - Whether invite was sent
+ */
+export async function updateLeadStatusGlobally(leadUrl, inviteStatus, inviteSent) {
+  try {
+    console.log(`🌍 GLOBAL UPDATE: Syncing ${inviteStatus} for all campaigns with ${leadUrl}`);
+    
+    const redis = getRedisClient();
+    
+    // Update ALL leads with this URL in PostgreSQL
+    const result = await db.update(leads)
+      .set({
+        inviteSent: inviteSent,
+        inviteStatus: inviteStatus,
+        inviteSentAt: new Date()
+      })
+      .where(eq(leads.url, leadUrl))
+      .returning();
+
+    const updatedCount = result.length;
+    console.log(`✅ Updated ${updatedCount} lead(s) globally in database`);
+
+    // Update Redis cache for all campaigns
+    const allCampaignKeys = await redis.keys('campaign:*:leads');
+    
+    let redisUpdated = 0;
+    for (const key of allCampaignKeys) {
+      const allLeadsInCampaign = await redis.hgetall(key);
+      
+      for (const [leadId, leadDataStr] of Object.entries(allLeadsInCampaign)) {
+        const leadData = JSON.parse(leadDataStr);
+        
+        if (leadData.url === leadUrl) {
+          leadData.inviteSent = inviteSent;
+          leadData.inviteStatus = inviteStatus;
+          leadData.inviteSentAt = new Date().toISOString();
+          await redis.hset(key, leadId, JSON.stringify(leadData));
+          redisUpdated++;
+        }
+      }
+    }
+    
+    console.log(`✅ Updated ${redisUpdated} lead(s) globally in Redis cache`);
+    return updatedCount;
+    
+  } catch (error) {
+    console.error(`❌ Failed to update lead globally for ${leadUrl}:`, error.message);
+    return 0;
   }
 }
 

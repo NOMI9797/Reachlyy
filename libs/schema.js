@@ -93,6 +93,10 @@ export const linkedinAccounts = pgTable('linkedin_accounts', {
   followUpMessages: integer('follow_up_messages').default(0),
   tags: json('tags').default([]), // Store tags as JSON array
   salesNavActive: boolean('sales_nav_active').default(true),
+  // Daily rate limiting
+  dailyInvitesSent: integer('daily_invites_sent').default(0).notNull(),
+  dailyLimit: integer('daily_limit').default(100).notNull(),
+  lastDailyReset: timestamp('last_daily_reset').defaultNow().notNull(),
   lastUsed: timestamp('last_used').defaultNow().notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),

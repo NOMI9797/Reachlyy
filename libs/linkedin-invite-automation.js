@@ -5,7 +5,7 @@
  * Separated from API logic for better maintainability and testability.
  */
 
-import { updateLeadStatus } from './lead-status-manager';
+import { updateLeadStatus, updateLeadStatusGlobally } from './lead-status-manager';
 
 // Debug mode: Enable screenshots and verbose logging
 const DEBUG_MODE = process.env.ENABLE_DEBUG === 'true' || process.env.NODE_ENV === 'development';
@@ -291,8 +291,11 @@ export async function checkConnectionStatus(page, campaignId, lead, results) {
     const pendingButton = page.locator('button:has-text("Pending")').first();
     if (await pendingButton.isVisible()) {
       console.log(`⏳ ALREADY PENDING: ${lead.name}`);
+      console.log(`🌍 LinkedIn shows "Pending" - syncing globally as SENT`);
       results.alreadyPending++;
-      await updateLeadStatus(campaignId, lead.id, 'pending', true);
+      
+      // Use GLOBAL update - this lead is pending across ALL campaigns
+      await updateLeadStatusGlobally(lead.url, 'sent', true);
       return true;
     }
   } catch (e) {
@@ -304,8 +307,11 @@ export async function checkConnectionStatus(page, campaignId, lead, results) {
     const messageButton = page.locator('button:has-text("Message")').first();
     if (await messageButton.isVisible()) {
       console.log(`✅ ALREADY CONNECTED: ${lead.name}`);
+      console.log(`🌍 LinkedIn shows "Message" - syncing globally as ACCEPTED`);
       results.alreadyConnected++;
-      await updateLeadStatus(campaignId, lead.id, 'accepted', true);
+      
+      // Use GLOBAL update - this lead is connected across ALL campaigns
+      await updateLeadStatusGlobally(lead.url, 'accepted', true);
       return true;
     }
   } catch (e) {
@@ -453,10 +459,8 @@ export async function processInvitesDirectly(context, page, leads, customMessage
     const lead = leads[i];
     
     try {
-      console.log(`\n${'='.repeat(60)}`);
-      console.log(`📤 INVITE ${i + 1}/${leads.length}: Processing ${lead.name}`);
-      console.log(`🔗 Navigating to: ${lead.url}`);
-      console.log(`${'='.repeat(60)}`);
+      console.log(`📤 INVITE ${i + 1}/${leads.length}: ${lead.name || 'Lead'}`);
+      console.log(`🔗 ${lead.url}`);
       
       // Navigate with better error handling
       try {
@@ -479,14 +483,10 @@ export async function processInvitesDirectly(context, page, leads, customMessage
       await page.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => {});
       await page.waitForTimeout(1000);  // Reduced from 3s → 1s
 
-      const currentUrl = page.url();
-      console.log(`✅ Current URL: ${currentUrl}`);
-
       // OPTIMIZATION: Take screenshot only in debug mode
       if (DEBUG_MODE) {
         const screenshotPath = `./debug-profile-${lead.id}-${Date.now()}.png`;
         await page.screenshot({ path: screenshotPath, fullPage: false });
-        console.log(`📸 Screenshot: ${screenshotPath}`);
       }
 
       // Check if already connected or pending
@@ -499,13 +499,9 @@ export async function processInvitesDirectly(context, page, leads, customMessage
       const connectButton = await findConnectButton(page);
       
       if (!connectButton) {
-        // Debug: Inspect all buttons
-        await inspectPageButtons(page);
-        
-        // No Connect button found anywhere
         console.log(`❌ NO CONNECT BUTTON: ${lead.name}`);
         results.failed++;
-        results.errors.push({ leadId: lead.id, name: lead.name, error: 'Connect button not found (direct or dropdown)' });
+        results.errors.push({ leadId: lead.id, name: lead.name, error: 'Connect button not found' });
         await updateLeadStatus(campaignId, lead.id, 'failed', false);
         continue;
       }
@@ -514,7 +510,6 @@ export async function processInvitesDirectly(context, page, leads, customMessage
       if (DEBUG_MODE) {
         const beforeClickPath = `./debug-before-click-${lead.id}-${Date.now()}.png`;
         await page.screenshot({ path: beforeClickPath, fullPage: false });
-        console.log(`📸 Before-click screenshot: ${beforeClickPath}`);
       }
 
       // Click Connect button
@@ -537,7 +532,6 @@ export async function processInvitesDirectly(context, page, leads, customMessage
       if (DEBUG_MODE) {
         const modalScreenshotPath = `./debug-modal-${lead.id}-${Date.now()}.png`;
         await page.screenshot({ path: modalScreenshotPath, fullPage: true });
-        console.log(`📸 Modal screenshot: ${modalScreenshotPath}`);
       }
       
       // Handle invitation modal
@@ -545,18 +539,22 @@ export async function processInvitesDirectly(context, page, leads, customMessage
       
       if (inviteSent) {
         results.sent++;
-        await updateLeadStatus(campaignId, lead.id, 'sent', true);
-        console.log(`✅ INVITE SENT: ${lead.name} (without note)`);
+        // Use GLOBAL update - this invite is sent for ALL campaigns with this URL
+        await updateLeadStatusGlobally(lead.url, 'sent', true);
+        console.log(`✅ INVITE SENT: ${lead.name || 'Lead'}`);
+        console.log(`🌍 Syncing invite status globally across all campaigns`);
       } else {
         results.failed++;
         results.errors.push({ leadId: lead.id, name: lead.name, error: 'Failed to send invite via modal' });
         await updateLeadStatus(campaignId, lead.id, 'failed', false);
       }
 
-      // Rate limiting: 2 seconds between invites (as requested)
+      // Rate limiting: 10-30 seconds randomized (human-like behavior to avoid detection)
       if (i < leads.length - 1) {
-        console.log(`⏱️ Waiting 2 seconds before next invite...`);
-        await page.waitForTimeout(2000);
+        const delayMs = 10000 + Math.floor(Math.random() * 20000); // 10-30 seconds
+        const delaySec = Math.floor(delayMs / 1000);
+        console.log(`⏱️ Waiting ${delaySec}s before next invite...`);
+        await page.waitForTimeout(delayMs);
       }
 
     } catch (error) {
