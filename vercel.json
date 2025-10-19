@@ -7,11 +7,8 @@
     {
       "path": "/api/linkedin/connections/check-schedule",
       "schedule": "0 14 * * *"
-    },
-    {
-      "path": "/api/linkedin/connections/check-schedule",
-      "schedule": "0 20 * * *"
     }
+    
   ]
 }
 
