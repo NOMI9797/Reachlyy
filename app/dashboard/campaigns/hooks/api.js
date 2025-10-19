@@ -258,3 +258,24 @@ export const scrapingApi = {
     return result;
   },
 };
+
+// LinkedIn Connection Checking API functions
+export const connectionCheckApi = {
+  // Check for accepted connections (manual trigger)
+  checkAcceptedConnections: async () => {
+    const response = await fetch("/api/linkedin/connections/check-acceptance", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+    });
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      throw new Error(result.error || "Failed to check connections");
+    }
+
+    return result;
+  },
+};

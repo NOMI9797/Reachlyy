@@ -22,37 +22,52 @@ export function extractLeadInfo(scrapedPosts) {
   const locations = new Set();
 
   scrapedPosts.forEach(post => {
-    // Extract name variations
-    if (post.authorName) names.add(post.authorName.trim());
-    if (post.name) names.add(post.name.trim());
+    // If this is a repost/activity, prioritize activityOfUser data
+    if (post.isActivity && post.activityOfUser) {
+      // Extract from activityOfUser (the person who reposted/shared)
+      const activityUser = post.activityOfUser;
+      
+      if (activityUser.firstName && activityUser.lastName) {
+        names.add(`${activityUser.firstName} ${activityUser.lastName}`.trim());
+      }
+      if (activityUser.occupation) titles.add(activityUser.occupation.trim());
+      if (activityUser.picture) {
+        console.log("Found activityOfUser.picture:", activityUser.picture);
+        profilePictures.add(activityUser.picture.trim());
+      }
+    } else {
+      // Extract name variations (for non-activity posts or original author)
+      if (post.authorName) names.add(post.authorName.trim());
+      if (post.name) names.add(post.name.trim());
 
-    // Extract title/headline variations
-    if (post.authorHeadline) titles.add(post.authorHeadline.trim());
-    if (post.headline) titles.add(post.headline.trim());
-    if (post.title) titles.add(post.title.trim());
+      // Extract title/headline variations
+      if (post.authorHeadline) titles.add(post.authorHeadline.trim());
+      if (post.headline) titles.add(post.headline.trim());
+      if (post.title) titles.add(post.title.trim());
 
-    // Extract company variations
-    if (post.authorCompany) companies.add(post.authorCompany.trim());
-    if (post.company) companies.add(post.company.trim());
+      // Extract company variations
+      if (post.authorCompany) companies.add(post.authorCompany.trim());
+      if (post.company) companies.add(post.company.trim());
 
-    // Extract profile picture variations
-    if (post.authorProfilePicture) {
-      console.log("Found authorProfilePicture:", post.authorProfilePicture);
-      profilePictures.add(post.authorProfilePicture.trim());
+      // Extract profile picture variations
+      if (post.authorProfilePicture) {
+        console.log("Found authorProfilePicture:", post.authorProfilePicture);
+        profilePictures.add(post.authorProfilePicture.trim());
+      }
+      if (post.authorImage) profilePictures.add(post.authorImage.trim());
+      if (post.profilePicture) profilePictures.add(post.profilePicture.trim());
+      if (post.avatar) profilePictures.add(post.avatar.trim());
+      
+      // Also check author.picture from nested author object
+      if (post.author?.picture) {
+        console.log("Found author.picture:", post.author.picture);
+        profilePictures.add(post.author.picture.trim());
+      }
+
+      // Extract location variations
+      if (post.authorLocation) locations.add(post.authorLocation.trim());
+      if (post.location) locations.add(post.location.trim());
     }
-    if (post.authorImage) profilePictures.add(post.authorImage.trim());
-    if (post.profilePicture) profilePictures.add(post.profilePicture.trim());
-    if (post.avatar) profilePictures.add(post.avatar.trim());
-    
-    // Also check author.picture from nested author object
-    if (post.author?.picture) {
-      console.log("Found author.picture:", post.author.picture);
-      profilePictures.add(post.author.picture.trim());
-    }
-
-    // Extract location variations
-    if (post.authorLocation) locations.add(post.authorLocation.trim());
-    if (post.location) locations.add(post.location.trim());
   });
 
   // Remove empty strings and "Unknown" values

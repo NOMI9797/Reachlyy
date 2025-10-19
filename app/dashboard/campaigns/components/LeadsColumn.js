@@ -19,6 +19,7 @@ import {
   MapPin,
   Trash2,
   MessageSquare,
+  UserCheck,
 } from "lucide-react";
 import {
   DndContext,
@@ -116,6 +117,35 @@ function SortableLeadItem({ lead, isSelected, onSelect, getDisplayName, getStatu
               <h4 className="font-semibold text-sm text-base-content truncate">
                 {getDisplayName(lead)}
               </h4>
+              
+              {/* Connection Status Indicator */}
+              {lead.inviteSent && (
+                <div 
+                  className={`w-2 h-2 rounded-full ${
+                    lead.inviteStatus === 'accepted' 
+                      ? 'bg-green-500' 
+                      : lead.inviteStatus === 'sent' 
+                      ? 'bg-yellow-500' 
+                      : 'bg-red-500'
+                  }`}
+                  title={
+                    lead.inviteStatus === 'accepted' 
+                      ? 'Connection Accepted ✓' 
+                      : lead.inviteStatus === 'sent' 
+                      ? 'Invite Pending...' 
+                      : 'Invite Failed'
+                  }
+                />
+              )}
+              
+              {/* Message Sent Indicator */}
+              {lead.messageSent && (
+                <div 
+                  className="w-2 h-2 rounded-full bg-blue-500"
+                  title={`Message Sent ${lead.messageSentAt ? new Date(lead.messageSentAt).toLocaleDateString() : ''}`}
+                />
+              )}
+              
               <div className={`badge badge-sm ${getStatusColor(lead.status)}`}>
                 {lead.status}
               </div>
@@ -176,6 +206,7 @@ const LeadsColumn = memo(function LeadsColumn({
   setScrapingSettings,
 }) {
   const { addLeads } = useLeads();
+  const { checkConnections, isChecking } = require("../hooks/useConnectionCheck").useConnectionCheck();
   const {
     isProcessing,
     scrapingProgress,
@@ -406,6 +437,43 @@ const LeadsColumn = memo(function LeadsColumn({
           <div className="flex items-center gap-2">
             <h2 className="font-bold text-base-content">Leads</h2>
             <div className="badge badge-primary badge-sm">{leads.length}</div>
+            
+            {/* Connection Status Legend */}
+            <div className="dropdown dropdown-end">
+              <div 
+                tabIndex={0} 
+                role="button" 
+                className="btn btn-ghost btn-circle btn-xs"
+                title="Connection status indicators"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" className="w-4 h-4 stroke-current">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                </svg>
+              </div>
+              <div tabIndex={0} className="dropdown-content z-[1] card card-compact w-64 p-3 shadow bg-base-200 border border-base-300">
+                <div className="text-xs space-y-2">
+                  <div className="font-semibold mb-2">Connection Status:</div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full bg-green-500"></div>
+                    <span>Accepted - Connection confirmed</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full bg-yellow-500"></div>
+                    <span>Pending - Invite sent, awaiting</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full bg-red-500"></div>
+                    <span>Failed - Invite error</span>
+                  </div>
+                  <div className="border-t border-base-300 my-2"></div>
+                  <div className="font-semibold mb-2">Message Status:</div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full bg-blue-500"></div>
+                    <span>Message sent successfully</span>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
           <button
             onClick={onToggleCollapse}
@@ -445,6 +513,27 @@ const LeadsColumn = memo(function LeadsColumn({
             <Play className="h-3 w-3" />
             Run All
           </button>
+        </div>
+
+        {/* Connection Check Button */}
+        <div className="mb-2">
+          <button
+            onClick={() => checkConnections()}
+            disabled={isChecking || isProcessing}
+            className="btn btn-accent btn-sm gap-1 w-full"
+            title="Check for accepted connection requests"
+          >
+            {isChecking ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : (
+              <UserCheck className="h-3 w-3" />
+            )}
+            {isChecking ? "Checking..." : "Check Connections"}
+          </button>
+        </div>
+
+        {/* Add/Import Buttons */}
+        <div className="grid grid-cols-2 gap-2 mb-2">
           <button
             onClick={() => setShowAddForm(!showAddForm)}
             className="btn btn-outline btn-sm gap-1"

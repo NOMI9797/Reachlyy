@@ -41,6 +41,13 @@ export const leads = pgTable('leads', {
   inviteSent: boolean('invite_sent').default(false).notNull(),
   inviteStatus: varchar('invite_status', { length: 20 }).default('pending').notNull(), // pending, sent, accepted, rejected, failed
   inviteRetryCount: integer('invite_retry_count').default(0), // Track retry attempts
+  inviteSentAt: timestamp('invite_sent_at'), // When invite was sent
+  inviteAcceptedAt: timestamp('invite_accepted_at'), // When connection was accepted
+  lastConnectionCheckAt: timestamp('last_connection_check_at'), // Last time we checked connections page
+  // Message tracking
+  messageSent: boolean('message_sent').default(false).notNull(),
+  messageSentAt: timestamp('message_sent_at'), // When message was sent on LinkedIn
+  messageError: text('message_error'), // Error message if sending failed
   addedAt: timestamp('added_at').defaultNow().notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
@@ -97,6 +104,13 @@ export const linkedinAccounts = pgTable('linkedin_accounts', {
   dailyInvitesSent: integer('daily_invites_sent').default(0).notNull(),
   dailyLimit: integer('daily_limit').default(100).notNull(),
   lastDailyReset: timestamp('last_daily_reset').defaultNow().notNull(),
+  // Connection check rate limiting
+  dailyConnectionChecks: integer('daily_connection_checks').default(0).notNull(),
+  lastConnectionCheckReset: timestamp('last_connection_check_reset').defaultNow().notNull(),
+  // Message sending rate limiting
+  dailyMessagesSent: integer('daily_messages_sent').default(0).notNull(),
+  dailyMessageLimit: integer('daily_message_limit').default(10).notNull(),
+  lastMessageReset: timestamp('last_message_reset').defaultNow().notNull(),
   lastUsed: timestamp('last_used').defaultNow().notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),

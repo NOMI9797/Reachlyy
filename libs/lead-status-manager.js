@@ -109,6 +109,63 @@ export async function updateLeadStatusGlobally(leadUrl, inviteStatus, inviteSent
 }
 
 /**
+ * Update lead connection accepted status globally (by URL)
+ * Marks connection as accepted with timestamp
+ * 
+ * @param {string} leadUrl - LinkedIn profile URL
+ * @param {Date} acceptedAt - When connection was accepted (defaults to now)
+ * @returns {Promise<number>} - Number of leads updated
+ */
+export async function updateLeadConnectionAccepted(leadUrl, acceptedAt = new Date()) {
+  try {
+    console.log(`🌍 CONNECTION ACCEPTED: Updating all campaigns with ${leadUrl}`);
+    
+    const redis = getRedisClient();
+    
+    // Update ALL leads with this URL in PostgreSQL
+    const result = await db.update(leads)
+      .set({
+        inviteSent: true,
+        inviteStatus: 'accepted',
+        inviteAcceptedAt: acceptedAt,
+        updatedAt: new Date()
+      })
+      .where(eq(leads.url, leadUrl))
+      .returning();
+
+    const updatedCount = result.length;
+    console.log(`✅ Marked ${updatedCount} lead(s) as accepted in database`);
+
+    // Update Redis cache for all campaigns
+    const allCampaignKeys = await redis.keys('campaign:*:leads');
+    
+    let redisUpdated = 0;
+    for (const key of allCampaignKeys) {
+      const allLeadsInCampaign = await redis.hgetall(key);
+      
+      for (const [leadId, leadDataStr] of Object.entries(allLeadsInCampaign)) {
+        const leadData = JSON.parse(leadDataStr);
+        
+        if (leadData.url === leadUrl) {
+          leadData.inviteSent = true;
+          leadData.inviteStatus = 'accepted';
+          leadData.inviteAcceptedAt = acceptedAt.toISOString();
+          await redis.hset(key, leadId, JSON.stringify(leadData));
+          redisUpdated++;
+        }
+      }
+    }
+    
+    console.log(`✅ Marked ${redisUpdated} lead(s) as accepted in Redis cache`);
+    return updatedCount;
+    
+  } catch (error) {
+    console.error(`❌ Failed to mark connection accepted for ${leadUrl}:`, error.message);
+    return 0;
+  }
+}
+
+/**
  * Fetch eligible leads for invite sending
  * First tries Redis cache, falls back to PostgreSQL
  * 
@@ -221,5 +278,117 @@ export function getLeadAnalytics(leads) {
     inviteStats,
     leadsWithInvites
   };
+}
+
+/**
+ * Update lead message sent status globally (by URL)
+ * Marks message as sent with timestamp
+ * 
+ * @param {string} leadUrl - LinkedIn profile URL
+ * @param {Date} sentAt - When message was sent (defaults to now)
+ * @returns {Promise<number>} - Number of leads updated
+ */
+export async function updateLeadMessageSent(leadUrl, sentAt = new Date()) {
+  try {
+    console.log(`🌍 MESSAGE SENT: Updating all campaigns with ${leadUrl}`);
+    
+    const redis = getRedisClient();
+    
+    // Update ALL leads with this URL in PostgreSQL
+    const result = await db.update(leads)
+      .set({
+        messageSent: true,
+        messageSentAt: sentAt,
+        messageError: null, // Clear any previous error
+        updatedAt: new Date()
+      })
+      .where(eq(leads.url, leadUrl))
+      .returning();
+
+    const updatedCount = result.length;
+    console.log(`✅ Marked ${updatedCount} lead(s) as message sent in database`);
+
+    // Update Redis cache for all campaigns
+    const allCampaignKeys = await redis.keys('campaign:*:leads');
+    
+    let redisUpdated = 0;
+    for (const key of allCampaignKeys) {
+      const allLeadsInCampaign = await redis.hgetall(key);
+      
+      for (const [leadId, leadDataStr] of Object.entries(allLeadsInCampaign)) {
+        const leadData = JSON.parse(leadDataStr);
+        
+        if (leadData.url === leadUrl) {
+          leadData.messageSent = true;
+          leadData.messageSentAt = sentAt.toISOString();
+          leadData.messageError = null;
+          await redis.hset(key, leadId, JSON.stringify(leadData));
+          redisUpdated++;
+        }
+      }
+    }
+    
+    console.log(`✅ Marked ${redisUpdated} lead(s) as message sent in Redis cache`);
+    return updatedCount;
+    
+  } catch (error) {
+    console.error(`❌ Failed to mark message sent for ${leadUrl}:`, error.message);
+    return 0;
+  }
+}
+
+/**
+ * Update lead message error status globally (by URL)
+ * Records error when message sending fails
+ * 
+ * @param {string} leadUrl - LinkedIn profile URL
+ * @param {string} errorMessage - Error message describing the failure
+ * @returns {Promise<number>} - Number of leads updated
+ */
+export async function updateLeadMessageError(leadUrl, errorMessage) {
+  try {
+    console.log(`🌍 MESSAGE ERROR: Recording error for ${leadUrl}`);
+    
+    const redis = getRedisClient();
+    
+    // Update ALL leads with this URL in PostgreSQL
+    const result = await db.update(leads)
+      .set({
+        messageSent: false,
+        messageError: errorMessage,
+        updatedAt: new Date()
+      })
+      .where(eq(leads.url, leadUrl))
+      .returning();
+
+    const updatedCount = result.length;
+    console.log(`✅ Recorded error for ${updatedCount} lead(s) in database`);
+
+    // Update Redis cache for all campaigns
+    const allCampaignKeys = await redis.keys('campaign:*:leads');
+    
+    let redisUpdated = 0;
+    for (const key of allCampaignKeys) {
+      const allLeadsInCampaign = await redis.hgetall(key);
+      
+      for (const [leadId, leadDataStr] of Object.entries(allLeadsInCampaign)) {
+        const leadData = JSON.parse(leadDataStr);
+        
+        if (leadData.url === leadUrl) {
+          leadData.messageSent = false;
+          leadData.messageError = errorMessage;
+          await redis.hset(key, leadId, JSON.stringify(leadData));
+          redisUpdated++;
+        }
+      }
+    }
+    
+    console.log(`✅ Recorded error for ${redisUpdated} lead(s) in Redis cache`);
+    return updatedCount;
+    
+  } catch (error) {
+    console.error(`❌ Failed to record message error for ${leadUrl}:`, error.message);
+    return 0;
+  }
 }
 
