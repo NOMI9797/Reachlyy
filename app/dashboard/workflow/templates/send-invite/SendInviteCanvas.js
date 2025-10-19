@@ -175,11 +175,13 @@ export default function SendInviteCanvas({ campaignName, campaignId }) {
       let buffer = '';
       let eventCount = 0;
 
-      while (true) {
+      let reading = true;
+      while (reading) {
         const { done, value } = await reader.read();
         
         if (done) {
           console.log('✅ SSE stream completed');
+          reading = false;
           break;
         }
 
