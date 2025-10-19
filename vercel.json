@@ -8,8 +8,7 @@
       "path": "/api/linkedin/connections/check-schedule",
       "schedule": "0 14 * * *"
     }
-    
-    
+
   ]
 }
 
