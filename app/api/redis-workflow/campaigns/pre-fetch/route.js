@@ -48,12 +48,13 @@ export const POST = withAuth(async (request, { user }) => {
       const existingData = await redis.hgetall(`campaign:${campaign.id}:data`);
       const existingLeads = await redis.hgetall(`campaign:${campaign.id}:leads`);
       
-      if (existingData && existingData.id && existingLeads && Object.keys(existingLeads).length > 0) {
-        console.log(`⏭️ PRE-FETCH: ${campaign.name} (${campaign.id}) → SKIPPED (already cached)`);
-        campaignsSkipped++;
-        totalLeadsCached += Object.keys(existingLeads).length;
-        continue;
-      }
+      // Always refresh cache to get latest data from database
+      // if (existingData && existingData.id && existingLeads && Object.keys(existingLeads).length > 0) {
+      //   console.log(`⏭️ PRE-FETCH: ${campaign.name} (${campaign.id}) → SKIPPED (already cached)`);
+      //   campaignsSkipped++;
+      //   totalLeadsCached += Object.keys(existingLeads).length;
+      //   continue;
+      // }
       
       const campaignLeads = await db.select()
         .from(leads)
@@ -65,7 +66,15 @@ export const POST = withAuth(async (request, { user }) => {
         .from(messages)
         .where(and(eq(messages.campaignId, campaign.id), eq(messages.userId, user.id)));
 
+      // Count invite statuses
+      const inviteStats = campaignLeads.reduce((acc, lead) => {
+        const status = lead.inviteStatus || 'pending';
+        acc[status] = (acc[status] || 0) + 1;
+        return acc;
+      }, {});
+      
       console.log(`📦 PRE-FETCH: ${campaign.name} (${campaign.id}) → ${campaignLeads.length} leads, ${campaignMessages.length} messages`);
+      console.log(`📊 INVITE STATUS: ${JSON.stringify(inviteStats)}`);
 
       // Store campaign data in Redis
       await redis.hset(`campaign:${campaign.id}:data`, {
@@ -91,7 +100,9 @@ export const POST = withAuth(async (request, { user }) => {
             company: lead.company,
             url: lead.url,
             status: lead.status,
-            hasMessage: leadsWithMessages.has(lead.id) // Include message status
+            hasMessage: leadsWithMessages.has(lead.id), // Include message status
+            inviteSent: lead.inviteSent || false,
+            inviteStatus: lead.inviteStatus || 'pending'
           });
         });
         

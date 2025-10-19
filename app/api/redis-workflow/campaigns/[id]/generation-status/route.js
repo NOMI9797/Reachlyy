@@ -67,9 +67,22 @@ export const GET = withAuth(async (request, { params, user }) => {
     const leadsNeedingMessages = leads.filter(lead => 
       lead.status === 'completed' && 
       lead.status !== 'error' &&
-      (!lead.hasMessage || lead.hasMessage === false)
+      (!lead.hasMessage || lead.hasMessage === false) &&
+      (!lead.inviteSent || lead.inviteSent === false)
     );
 
+    // Count invite statuses
+    const inviteStats = leads.reduce((acc, lead) => {
+      const status = lead.inviteStatus || 'pending';
+      acc[status] = (acc[status] || 0) + 1;
+      return acc;
+    }, {});
+    
+    const leadsWithInvites = leads.filter(lead => lead.inviteSent === true).length;
+    
+    console.log(`📊 INVITE STATUS: ${JSON.stringify(inviteStats)}`);
+    console.log(`📊 STATUS FILTER: ${leadsNeedingMessages.length} need messages, ${leadsWithInvites} have invites sent`);
+    
     // Found leads ready for messages
 
     // Get Redis stream queue length from pipeline results

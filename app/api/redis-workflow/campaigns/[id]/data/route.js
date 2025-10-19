@@ -51,15 +51,25 @@ export const GET = withAuth(async (request, { params, user }) => {
       });
     }
 
-    // Add message status to each lead
+    // Add message status and invite status to each lead
     const leadsWithMessageStatus = leads.map(lead => ({
       ...lead,
       hasMessage: !!messageMap[lead.id],
       messageId: messageMap[lead.id]?.id || null,
-      messageStatus: messageMap[lead.id]?.status || null
+      messageStatus: messageMap[lead.id]?.status || null,
+      inviteSent: lead.inviteSent || false,
+      inviteStatus: lead.inviteStatus || 'pending'
     }));
 
+    // Count invite statuses
+    const inviteStats = leadsWithMessageStatus.reduce((acc, lead) => {
+      const status = lead.inviteStatus || 'pending';
+      acc[status] = (acc[status] || 0) + 1;
+      return acc;
+    }, {});
+    
     console.log(`✅ Redis-First: Retrieved ${leads.length} leads (${Object.keys(messageMap).length} with messages) from Redis for campaign ${campaignId}`);
+    console.log(`📊 INVITE STATUS: ${JSON.stringify(inviteStats)}`);
 
     return NextResponse.json({
       success: true,

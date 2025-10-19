@@ -13,15 +13,43 @@ import SendInviteCanvas from "./templates/send-invite/SendInviteCanvas";
 import ExtraProfileViewsCanvas from "./templates/extra-profile-views/ExtraProfileViewsCanvas";
 import StatisticsTab from "./components/StatisticsTab";
 import SettingsTab from "./components/SettingsTab";
+import { useCampaigns } from "../campaigns/hooks/useCampaigns";
 
 export default function WorkflowPage() {
   const { data: session, status } = useSession();
   const searchParams = useSearchParams();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   
-  // Simple dummy campaign data
-  const displayCampaignName = "LinkedIn Outreach Campaign";
-  const campaignStatusInfo = { status: 'completed', color: 'bg-success', text: 'Completed' };
+  // Get campaign data from URL parameters
+  const campaignId = searchParams.get('campaignId');
+  const campaignName = searchParams.get('campaign') || "LinkedIn Outreach Campaign";
+  
+  // Fetch real campaign data using React Query
+  const { campaigns, loading: campaignsLoading } = useCampaigns();
+  
+  // Find the specific campaign if campaignId is provided
+  const selectedCampaign = campaignId ? campaigns.find(c => c.id === campaignId) : null;
+  
+  // Use real campaign data or fallback to URL params
+  const displayCampaignName = selectedCampaign?.name || campaignName;
+  const campaignStatus = selectedCampaign?.status || 'draft';
+  
+  // Status info based on real campaign data
+  const getStatusInfo = (status) => {
+    switch (status) {
+      case 'active':
+        return { status: 'active', color: 'bg-success', text: 'Active' };
+      case 'paused':
+        return { status: 'paused', color: 'bg-warning', text: 'Paused' };
+      case 'completed':
+        return { status: 'completed', color: 'bg-info', text: 'Completed' };
+      case 'draft':
+      default:
+        return { status: 'draft', color: 'bg-base-300', text: 'Draft' };
+    }
+  };
+  
+  const campaignStatusInfo = getStatusInfo(campaignStatus);
 
   // Redirect if not authenticated
   useEffect(() => {
@@ -31,7 +59,7 @@ export default function WorkflowPage() {
     }
   }, [session, status]);
 
-  if (status === "loading") {
+  if (status === "loading" || campaignsLoading) {
     return (
       <div className="min-h-screen bg-base-100 flex items-center justify-center">
         <div className="loading loading-spinner loading-lg text-primary"></div>
@@ -74,6 +102,11 @@ export default function WorkflowPage() {
                     <div className="text-lg font-semibold text-base-content">
                       {displayCampaignName}
                     </div>
+                    {campaignId && (
+                      <div className="text-xs text-base-content/60 mt-1">
+                        ID: {campaignId}
+                      </div>
+                    )}
                   </div>
                   <div className="mt-2 flex items-center gap-2 text-sm text-base-content/60">
                     <span className="inline-flex items-center gap-1">
@@ -89,13 +122,13 @@ export default function WorkflowPage() {
                   <div className="mt-4 flex items-center justify-between text-base-content">
                     <div className="text-sm">Acceptance rate</div>
                     <div className="text-sm font-semibold">
-                      {campaignStatusInfo.status === 'completed' ? '75%' : '0%'}
+                      {selectedCampaign?.acceptanceRate || '0%'}
                     </div>
                   </div>
                   <div className="mt-3 flex items-center justify-between text-base-content">
                     <div className="text-sm">Response rate</div>
                     <div className="text-sm font-semibold">
-                      {campaignStatusInfo.status === 'completed' ? '25%' : '0%'}
+                      {selectedCampaign?.responseRate || '0%'}
                     </div>
                   </div>
                 </div>
@@ -107,8 +140,8 @@ export default function WorkflowPage() {
                     <input 
                       type="checkbox" 
                       className="toggle toggle-primary" 
-                      checked={campaignStatusInfo.status === 'running' || campaignStatusInfo.status === 'completed'}
-                      disabled={campaignStatusInfo.status === 'completed'}
+                      checked={campaignStatus === 'active'}
+                      disabled={campaignStatus === 'completed'}
                     />
                   </div>
                   <div className="text-sm text-base-content/60">{new Date().toLocaleDateString()}</div>
@@ -127,9 +160,9 @@ export default function WorkflowPage() {
               AudienceTab={AudienceTab}
               SequenceTab={() => {
                 const template = searchParams.get('template');
-                if (template === 'lead-generation') return <LeadGenerationCanvas />;
-                if (template === 'endorse-my-skills') return <SendInviteCanvas />;
-                if (template === 'extra-profile-views') return <ExtraProfileViewsCanvas />;
+                if (template === 'lead-generation') return <LeadGenerationCanvas campaignName={campaignName} campaignId={campaignId} />;
+                if (template === 'endorse-my-skills') return <SendInviteCanvas campaignName={campaignName} campaignId={campaignId} />;
+                if (template === 'extra-profile-views') return <ExtraProfileViewsCanvas campaignName={campaignName} campaignId={campaignId} />;
                 return <SequenceTemplates />;
               }}
               StatisticsTab={StatisticsTab}

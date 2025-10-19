@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Minus, Maximize2, Save, Target, Undo2, Trash2 } from "lucide-react";
+import { Plus, Minus, Maximize2, Save, Target, Undo2, Trash2, Play, AlertCircle } from "lucide-react";
 import ReactFlow, { Background, Controls, MiniMap, addEdge, useEdgesState, useNodesState, MarkerType, BaseEdge, getBezierPath, Handle, Position, EdgeLabelRenderer } from "reactflow";
 import "reactflow/dist/style.css";
 
@@ -104,6 +104,14 @@ export default function SendInviteCanvas({ campaignName, campaignId }) {
   const [isDark, setIsDark] = useState(true);
   const containerRef = useRef(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  
+  // Workflow state
+  const [isRunning, setIsRunning] = useState(false);
+  const [activationStatus, setActivationStatus] = useState(null);
+  
+  // Progress state for SSE
+  const [progress, setProgress] = useState({ current: 0, total: 0 });
+  const [isProcessing, setIsProcessing] = useState(false);
 
   const onInit = useCallback((instance) => {
     rf.current = instance;
@@ -120,6 +128,138 @@ export default function SendInviteCanvas({ campaignName, campaignId }) {
     setNodes((nds) => nds.filter((node) => node.id !== nodeId));
     setEdges((eds) => eds.filter((edge) => edge.source !== nodeId && edge.target !== nodeId));
   }, [setNodes, setEdges]);
+
+  // Run Workflow function - uses SSE for real-time progress
+  const handleRunWorkflow = async () => {
+    if (!campaignId) {
+      setActivationStatus({
+        type: 'error',
+        message: 'Campaign ID is required to run workflow'
+      });
+      return;
+    }
+
+    setIsRunning(true);
+    setActivationStatus(null);
+    setProgress({ current: 0, total: 0 });
+    setIsProcessing(true);
+
+    console.log(`🚀 Starting SSE workflow for campaign: ${campaignId}`);
+
+    try {
+      const response = await fetch(`/api/redis-workflow/campaigns/${campaignId}/activate-stream`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          customMessage: "Hi there! I'd like to connect with you.",
+          batchSize: 10
+        })
+      });
+
+      console.log('📡 SSE Response:', { ok: response.ok, status: response.status });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      if (!response.body) {
+        throw new Error('Response body is null - streaming not supported');
+      }
+
+      console.log('📡 Starting to read SSE stream...');
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let eventCount = 0;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        
+        if (done) {
+          console.log('✅ SSE stream completed');
+          break;
+        }
+
+        const chunk = decoder.decode(value, { stream: true });
+        buffer += chunk;
+        const lines = buffer.split('\n\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            eventCount++;
+            const jsonData = line.slice(6);
+            
+            try {
+              const data = JSON.parse(jsonData);
+              console.log(`📡 SSE Event #${eventCount}:`, data.type, data);
+
+              if (data.type === 'start') {
+                console.log(`🎬 START: ${data.total} leads, ${data.batches} batches`);
+                setProgress({ current: 0, total: data.total });
+              } 
+              else if (data.type === 'progress') {
+                console.log(`⏳ PROGRESS: ${data.current}/${data.total} (${data.percentage}%)`);
+                setProgress({ current: data.current, total: data.total });
+              } 
+              else if (data.type === 'batch_delay') {
+                console.log(`⏱️ DELAY: Waiting ${data.delayMinutes} min before batch ${data.nextBatch}`);
+                setActivationStatus({
+                  type: 'info',
+                  message: `Waiting ${data.delayMinutes} minutes before next batch (${data.nextBatch}/${data.totalBatches})...`
+                });
+              }
+              else if (data.type === 'limit_reached') {
+                console.log(`⚠️ LIMIT REACHED: ${data.message}`);
+                setActivationStatus({
+                  type: 'warning',
+                  message: data.message,
+                  details: `${data.remaining} batches remaining. Resume tomorrow.`
+                });
+              }
+              else if (data.type === 'complete') {
+                console.log(`🎉 COMPLETE:`, data);
+                setProgress({ current: data.total, total: data.total });
+                setActivationStatus({
+                  type: 'success',
+                  message: `Workflow completed!`,
+                  details: `Sent: ${data.sent}, Already Connected: ${data.alreadyConnected}, Already Pending: ${data.alreadyPending}, Failed: ${data.failed}`
+                });
+                setIsProcessing(false);
+              } 
+              else if (data.type === 'error') {
+                console.log(`❌ ERROR:`, data.message);
+                setActivationStatus({
+                  type: 'error',
+                  message: data.message,
+                  details: data.details
+                });
+                setIsProcessing(false);
+              }
+            } catch (parseError) {
+              console.error('❌ Failed to parse SSE JSON:', parseError);
+            }
+          }
+        }
+      }
+      
+      console.log(`✅ Total SSE events: ${eventCount}`);
+    } catch (error) {
+      console.error('❌ SSE Error:', error);
+      setActivationStatus({
+        type: 'error',
+        message: 'Network error occurred while activating workflow',
+        details: error.message
+      });
+      setIsProcessing(false);
+    } finally {
+      setIsRunning(false);
+      console.log('🏁 Workflow execution finished');
+    }
+  };
 
   useEffect(() => {
     const detect = () => {
@@ -287,17 +427,87 @@ export default function SendInviteCanvas({ campaignName, campaignId }) {
           {/* Removed default ReactFlow controls to avoid bottom-left plus button */}
           <Background variant="dots" gap={18} size={1} color={isDark ? "#6b7280" : "#cbd5e1"} />
         </ReactFlow>
+        {/* Progress Bar - Compact Top-Right */}
+        {isProcessing && progress.total > 0 && (
+          <div className="absolute top-4 right-4 z-[100] w-80">
+            <div className="bg-base-100 rounded-lg shadow-xl border border-base-300 p-3">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-medium text-base-content flex items-center gap-1.5">
+                  <span className="loading loading-spinner loading-xs text-primary"></span>
+                  {progress.current === 0 && progress.total === 1 ? 'Connecting...' : 'Processing'}
+                </span>
+                <span className="text-xs font-mono font-semibold text-primary">
+                  {progress.current === 0 && progress.total === 1 
+                    ? '...' 
+                    : `${progress.current}/${progress.total} (${Math.round((progress.current / progress.total) * 100)}%)`
+                  }
+                </span>
+              </div>
+              
+              {/* Progress Bar */}
+              <div className="w-full bg-base-300 rounded-full h-2 overflow-hidden">
+                <div 
+                  className="bg-gradient-to-r from-primary to-secondary h-full rounded-full transition-all duration-300 ease-out"
+                  style={{ 
+                    width: progress.current === 0 && progress.total === 1 
+                      ? '0%' 
+                      : `${(progress.current / progress.total) * 100}%` 
+                  }}
+                />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Status Display */}
+        {activationStatus && !isProcessing && (
+          <div className={`absolute top-4 left-4 right-4 z-50 alert ${
+            activationStatus.type === 'success' ? 'alert-success' : 
+            activationStatus.type === 'warning' ? 'alert-warning' :
+            activationStatus.type === 'info' ? 'alert-info' : 'alert-error'
+          } shadow-xl`}>
+            <AlertCircle className="h-4 w-4" />
+            <div>
+              <div className="font-medium">{activationStatus.message}</div>
+              {activationStatus.details && (
+                <div className="text-xs opacity-75">{activationStatus.details}</div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Bottom action bar */}
         <div className={`absolute left-0 right-0 bottom-0 px-6 h-16 ${isDark ? 'bg-[#0f172a] border-slate-700' : 'bg-slate-50 border-slate-200'} border-t flex items-center justify-between backdrop-blur-sm`}>
           <div className={`text-xs ${isDark ? 'text-slate-300' : 'text-slate-600'} max-w-2xl leading-relaxed`}>
-            All leads that reply to your connection request, message or InMail will be put on hold, and further actions won&apos;t be performed
+            {campaignId ? (
+              <>Campaign: <span className="font-medium">{campaignName}</span> (ID: {campaignId})</>
+            ) : (
+              <div className="flex items-center gap-2">
+                <AlertCircle className="h-4 w-4 text-warning" />
+                <span>No campaign selected. Please navigate from a campaign to run this workflow.</span>
+              </div>
+            )}
           </div>
           <div className="flex items-center gap-3">
-            <button className="btn btn-ghost btn-sm text-slate-400 hover:text-slate-200" onClick={() => {/* TODO: hook cancel */}}>
+            <button className="btn btn-ghost btn-sm text-slate-400 hover:text-slate-200" onClick={() => router.back()}>
               Cancel
             </button>
-            <button className="btn btn-primary btn-sm px-6 font-medium shadow-lg hover:shadow-xl transition-all duration-200" onClick={() => {/* TODO: hook run workflow */}}>
-              Run Workflow
+            <button 
+              className={`btn btn-primary btn-sm px-6 font-medium shadow-lg hover:shadow-xl transition-all duration-200 ${isRunning ? 'loading' : ''}`}
+              onClick={handleRunWorkflow}
+              disabled={isRunning || !campaignId}
+            >
+              {isRunning ? (
+                <>
+                  <span className="loading loading-spinner loading-xs mr-2"></span>
+                  Activating...
+                </>
+              ) : (
+                <>
+                  <Play className="h-4 w-4 mr-2" />
+                  Run Workflow
+                </>
+              )}
             </button>
           </div>
         </div>

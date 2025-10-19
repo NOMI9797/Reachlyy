@@ -55,7 +55,15 @@ export const POST = withAuth(async (request, { params, user }) => {
       .from(messages)
       .where(eq(messages.campaignId, campaignId));
 
+    // Count invite statuses
+    const inviteStats = campaignLeads.reduce((acc, lead) => {
+      const status = lead.inviteStatus || 'pending';
+      acc[status] = (acc[status] || 0) + 1;
+      return acc;
+    }, {});
+    
     console.log(`📦 CACHE REFRESH: Found ${campaignLeads.length} leads and ${campaignMessages.length} messages in DB for campaign ${campaignId}`);
+    console.log(`📊 INVITE STATUS: ${JSON.stringify(inviteStats)}`);
 
     // Step 4: Clear existing Redis cache for this campaign
     console.log(`🗑️ CACHE REFRESH: Clearing existing Redis cache for campaign ${campaignId}`);
@@ -87,7 +95,9 @@ export const POST = withAuth(async (request, { params, user }) => {
           url: lead.url,
           status: lead.status,
           profilePicture: lead.profilePicture,
-          posts: lead.posts
+          posts: lead.posts,
+          inviteSent: lead.inviteSent || false,
+          inviteStatus: lead.inviteStatus || 'pending'
         });
       });
       

@@ -65,12 +65,23 @@ export const POST = withAuth(async (request, { params, user }) => {
     const leadsNeedingMessages = allLeads.filter(lead => 
       lead.status === 'completed' && 
       lead.status !== 'error' &&
-      (!lead.hasMessage || lead.hasMessage === false)
+      (!lead.hasMessage || lead.hasMessage === false) &&
+      (!lead.inviteSent || lead.inviteSent === false)
     );
 
     const errorLeads = allLeads.filter(lead => lead.status === 'error').length;
     const leadsWithMessages = allLeads.filter(lead => lead.hasMessage === true).length;
-    // Filtered leads for queuing
+    const leadsWithInvites = allLeads.filter(lead => lead.inviteSent === true).length;
+    
+    // Count invite statuses
+    const inviteStats = allLeads.reduce((acc, lead) => {
+      const status = lead.inviteStatus || 'pending';
+      acc[status] = (acc[status] || 0) + 1;
+      return acc;
+    }, {});
+    
+    console.log(`📊 INVITE STATUS: ${JSON.stringify(inviteStats)}`);
+    console.log(`📊 QUEUE FILTER: ${leadsNeedingMessages.length} need messages, ${leadsWithInvites} have invites sent`);
 
     if (leadsNeedingMessages.length === 0) {
       // All leads already have messages
