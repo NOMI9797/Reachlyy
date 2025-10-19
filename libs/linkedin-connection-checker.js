@@ -6,10 +6,10 @@
  */
 
 import { testLinkedInSession, cleanupBrowserSession } from './linkedin-session-validator';
-import { updateLeadStatusGlobally, updateLeadMessageSent, updateLeadMessageError } from './lead-status-manager';
+import { updateLeadStatus } from './lead-status-manager';
 import { db } from './db';
 import { leads, campaigns, messages } from './schema';
-import { eq, and, inArray } from 'drizzle-orm';
+import { eq, and, or, inArray } from 'drizzle-orm';
 import getRedisClient from './redis';
 import { sendMessageToLead, randomDelay } from './linkedin-message-sender';
 import { checkDailyMessageLimit, incrementMessageCounter } from './rate-limit-manager';
@@ -153,24 +153,38 @@ export async function scrapeConnectionsPage(page, targetCount = 50) {
  */
 async function fetchLeadsWithSentInvites(userId) {
   try {
-    console.log(`📥 Fetching leads with sent invites for user ${userId}`);
+    console.log(`📥 Fetching leads for connection check (sent invites + accepted without messages)`);
     
-    // Fetch from PostgreSQL (source of truth)
-    const sentLeads = await db
+    // Fetch leads that either:
+    // 1. Have sent invites (status = 'sent') - check if accepted
+    // 2. Are already accepted but haven't received messages yet
+    const leadsToCheck = await db
       .select()
       .from(leads)
       .where(
         and(
           eq(leads.userId, userId),
-          eq(leads.inviteStatus, 'sent')
+          or(
+            eq(leads.inviteStatus, 'sent'),  // Pending invites
+            and(
+              eq(leads.inviteStatus, 'accepted'),  // Already connected
+              eq(leads.messageSent, false)  // But no message sent yet
+            )
+          )
         )
       );
     
-    console.log(`✅ Found ${sentLeads.length} leads with sent invites`);
-    return sentLeads;
+    const sentCount = leadsToCheck.filter(l => l.inviteStatus === 'sent').length;
+    const acceptedCount = leadsToCheck.filter(l => l.inviteStatus === 'accepted' && !l.messageSent).length;
+    
+    console.log(`✅ Found ${leadsToCheck.length} leads to check:`);
+    console.log(`   - ${sentCount} with sent invites (check for acceptance)`);
+    console.log(`   - ${acceptedCount} accepted but no message sent`);
+    
+    return leadsToCheck;
     
   } catch (error) {
-    console.error('❌ Error fetching leads with sent invites:', error);
+    console.error('❌ Error fetching leads:', error);
     throw error;
   }
 }
@@ -271,30 +285,31 @@ export async function checkConnectionAcceptances(accountData, userId) {
     
     console.log(`\n📊 Matched ${matchedLeads.length}/${sentLeads.length} leads\n`);
     
-    // STEP 6: Update matched leads globally
+    // STEP 6: Update matched leads in their respective campaigns
     if (matchedLeads.length > 0) {
-      console.log('💾 STEP 6: Updating matched leads globally...');
+      console.log('💾 STEP 6: Updating matched leads in their campaigns...');
       
       const updatePromises = matchedLeads.map(async (lead) => {
         try {
-          await updateLeadStatusGlobally(lead.url, 'accepted', true);
+          // Update lead status in its specific campaign
+          await updateLeadStatus(lead.campaignId, lead.id, 'accepted', true);
           
-          // Also update inviteAcceptedAt timestamp
+          // Also update inviteAcceptedAt timestamp in database
           await db.update(leads)
             .set({ 
               inviteAcceptedAt: new Date(),
               lastConnectionCheckAt: new Date()
             })
-            .where(eq(leads.url, lead.url));
+            .where(eq(leads.id, lead.id));
           
-          console.log(`✅ Updated: ${lead.name || 'Lead'}`);
+          console.log(`✅ Updated: ${lead.name || 'Lead'} in campaign ${lead.campaignId}`);
         } catch (error) {
           console.error(`❌ Failed to update lead ${lead.id}:`, error.message);
         }
       });
       
       await Promise.all(updatePromises);
-      console.log(`✅ Successfully updated ${matchedLeads.length} leads globally\n`);
+      console.log(`✅ Successfully updated ${matchedLeads.length} leads in their campaigns\n`);
     }
     
     // STEP 7: Send messages to accepted connections (if they have generated messages)
@@ -358,8 +373,14 @@ export async function checkConnectionAcceptances(accountData, userId) {
             );
             
             if (result.success) {
-              // Update lead status globally
-              await updateLeadMessageSent(lead.url, new Date());
+              // Update lead message status in database
+              await db.update(leads)
+                .set({
+                  messageSent: true,
+                  messageSentAt: new Date(),
+                  messageError: null
+                })
+                .where(eq(leads.id, lead.id));
               
               // Update message status in database
               await db.update(messages)
@@ -382,12 +403,24 @@ export async function checkConnectionAcceptances(accountData, userId) {
               
             } else {
               console.error(`❌ Failed to send message: ${result.error}`);
-              await updateLeadMessageError(lead.url, result.error);
+              // Update lead message error in database
+              await db.update(leads)
+                .set({
+                  messageSent: false,
+                  messageError: result.error
+                })
+                .where(eq(leads.id, lead.id));
             }
             
           } catch (error) {
             console.error(`❌ Error sending message to ${lead.name}:`, error.message);
-            await updateLeadMessageError(lead.url, error.message);
+            // Update lead message error in database
+            await db.update(leads)
+              .set({
+                messageSent: false,
+                messageError: error.message
+              })
+              .where(eq(leads.id, lead.id));
           }
         }
         

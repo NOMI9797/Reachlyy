@@ -105,19 +105,42 @@ export const POST = withAuth(async (request, { params, user }) => {
       }, { status: 400 });
     }
 
-    // Check for existing URLs in this campaign to prevent duplicates (user-scoped)
-    const existingLeads = await db
-      .select({ url: leads.url })
+    // Check for existing URLs across ALL campaigns for this user to prevent duplicates
+    const existingLeadsAcrossAllCampaigns = await db
+      .select({
+        url: leads.url,
+        campaignId: leads.campaignId,
+        campaignName: campaigns.name
+      })
       .from(leads)
-      .where(and(eq(leads.campaignId, campaignId), eq(leads.userId, user.id)));
+      .leftJoin(campaigns, eq(leads.campaignId, campaigns.id))
+      .where(eq(leads.userId, user.id));
     
-    const existingUrls = new Set(existingLeads.map(lead => lead.url));
-    const newLeads = leadsToInsert.filter(lead => !existingUrls.has(lead.url));
+    const existingUrlsMap = new Map();
+    existingLeadsAcrossAllCampaigns.forEach(lead => {
+      existingUrlsMap.set(lead.url, lead.campaignName || 'Unknown Campaign');
+    });
+    
+    const newLeads = [];
+    const skippedLeads = [];
+    
+    leadsToInsert.forEach(lead => {
+      if (existingUrlsMap.has(lead.url)) {
+        skippedLeads.push({
+          url: lead.url,
+          name: lead.name,
+          reason: `Already exists in campaign: ${existingUrlsMap.get(lead.url)}`
+        });
+      } else {
+        newLeads.push(lead);
+      }
+    });
 
     if (newLeads.length === 0) {
       return NextResponse.json({
         success: false,
-        message: 'All URLs already exist in this campaign'
+        message: 'All URLs already exist in your campaigns',
+        skippedLeads: skippedLeads
       }, { status: 400 });
     }
 
@@ -210,9 +233,14 @@ export const POST = withAuth(async (request, { params, user }) => {
 
     return NextResponse.json({
       success: true,
-      message: `Successfully added ${insertedLeads.length} leads`,
+      message: `Successfully added ${insertedLeads.length} lead${insertedLeads.length !== 1 ? 's' : ''}${skippedLeads.length > 0 ? `, skipped ${skippedLeads.length} duplicate${skippedLeads.length !== 1 ? 's' : ''}` : ''}`,
       leads: insertedLeads,
-      duplicatesSkipped: leadsToInsert.length - newLeads.length
+      skippedLeads: skippedLeads,
+      stats: {
+        added: insertedLeads.length,
+        skipped: skippedLeads.length,
+        total: leadsToInsert.length
+      }
     });
 
   } catch (error) {

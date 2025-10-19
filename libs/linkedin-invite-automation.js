@@ -5,7 +5,7 @@
  * Separated from API logic for better maintainability and testability.
  */
 
-import { updateLeadStatus, updateLeadStatusGlobally } from './lead-status-manager';
+import { updateLeadStatus } from './lead-status-manager';
 
 // Debug mode: Enable screenshots and verbose logging
 const DEBUG_MODE = process.env.ENABLE_DEBUG === 'true' || process.env.NODE_ENV === 'development';
@@ -212,7 +212,11 @@ export async function findConnectButton(page) {
     'button[aria-label*="Invite"][aria-label*="connect"]',
     'button.artdeco-button:has-text("Connect")',
     'button:text-is("Connect")',
-    'button:has(span:text("Connect"))'
+    'button:has(span:text("Connect"))',
+    // Additional selectors for edge cases
+    'button[data-control-name="connect"]',
+    'button[aria-label*="Connect"]',
+    'div[role="button"]:has-text("Connect")'
   ];
 
   // Try direct connect button first
@@ -271,6 +275,25 @@ export async function findConnectButton(page) {
     return connectInDropdown;
   }
   
+  // Log what buttons we actually found for debugging
+  try {
+    const allButtons = await searchContext.locator('button').all();
+    const buttonTexts = [];
+    for (const button of allButtons.slice(0, 10)) { // Limit to first 10 buttons
+      try {
+        const text = await button.textContent();
+        if (text && text.trim()) {
+          buttonTexts.push(text.trim());
+        }
+      } catch (e) {
+        continue;
+      }
+    }
+    console.log(`🔍 Available buttons on page: ${buttonTexts.join(', ')}`);
+  } catch (e) {
+    console.log(`⚠️ Could not get button texts: ${e.message}`);
+  }
+  
   console.log(`❌ Connect button not found`);
   return null;
 }
@@ -291,11 +314,11 @@ export async function checkConnectionStatus(page, campaignId, lead, results) {
     const pendingButton = page.locator('button:has-text("Pending")').first();
     if (await pendingButton.isVisible()) {
       console.log(`⏳ ALREADY PENDING: ${lead.name}`);
-      console.log(`🌍 LinkedIn shows "Pending" - syncing globally as SENT`);
+      console.log(`📝 LinkedIn shows "Pending" - updating as SENT`);
       results.alreadyPending++;
       
-      // Use GLOBAL update - this lead is pending across ALL campaigns
-      await updateLeadStatusGlobally(lead.url, 'sent', true);
+      // Update this lead in this campaign
+      await updateLeadStatus(campaignId, lead.id, 'sent', true);
       return true;
     }
   } catch (e) {
@@ -307,15 +330,53 @@ export async function checkConnectionStatus(page, campaignId, lead, results) {
     const messageButton = page.locator('button:has-text("Message")').first();
     if (await messageButton.isVisible()) {
       console.log(`✅ ALREADY CONNECTED: ${lead.name}`);
-      console.log(`🌍 LinkedIn shows "Message" - syncing globally as ACCEPTED`);
+      console.log(`📝 LinkedIn shows "Message" - updating as ACCEPTED`);
       results.alreadyConnected++;
       
-      // Use GLOBAL update - this lead is connected across ALL campaigns
-      await updateLeadStatusGlobally(lead.url, 'accepted', true);
+      // Update this lead in this campaign
+      await updateLeadStatus(campaignId, lead.id, 'accepted', true);
       return true;
     }
   } catch (e) {
     // No message button found, continue
+  }
+  
+  // 3. Check for other connection states that might prevent Connect button
+  try {
+    // Check for "Connected" text
+    const connectedText = page.locator('text="Connected"').first();
+    if (await connectedText.isVisible()) {
+      console.log(`✅ ALREADY CONNECTED: ${lead.name} (Connected text found)`);
+      console.log(`📝 LinkedIn shows "Connected" - updating as ACCEPTED`);
+      results.alreadyConnected++;
+      
+      await updateLeadStatus(campaignId, lead.id, 'accepted', true);
+      return true;
+    }
+  } catch (e) {
+    // No connected text found, continue
+  }
+  
+  // 4. Check for "Following" button (might be following instead of connected)
+  try {
+    const followingButton = page.locator('button:has-text("Following")').first();
+    if (await followingButton.isVisible()) {
+      console.log(`ℹ️ FOLLOWING: ${lead.name} (Following button found - not connected)`);
+      // Don't return true here, let it try to find Connect button
+    }
+  } catch (e) {
+    // No following button found, continue
+  }
+  
+  // 5. Check for "Follow" button (not connected, but might be able to connect)
+  try {
+    const followButton = page.locator('button:has-text("Follow")').first();
+    if (await followButton.isVisible()) {
+      console.log(`ℹ️ FOLLOW AVAILABLE: ${lead.name} (Follow button found - Connect might be in dropdown)`);
+      // Don't return true here, let it try to find Connect button
+    }
+  } catch (e) {
+    // No follow button found, continue
   }
   
   return false;
@@ -365,10 +426,28 @@ export async function clickConnectButton(connectButton, page) {
 export async function handleInviteModal(page) {
   console.log(`🔍 Looking for invitation modal...`);
   
-  // Check if modal is visible
+  // Check if invitation modal is visible (more specific selector)
   let modalVisible = false;
   try {
-    modalVisible = await page.locator('div[role="dialog"]').isVisible();
+    // Look for the specific invite modal, not just any dialog
+    const inviteModalSelectors = [
+      'div[role="dialog"].send-invite',
+      'div.artdeco-modal.send-invite',
+      'div[role="dialog"][aria-labelledby="send-invite-modal"]',
+      'div[role="dialog"]:has(button:text("Send without a note"))',
+      'div[role="dialog"]:has(button:text("Add a note"))'
+    ];
+    
+    for (const selector of inviteModalSelectors) {
+      try {
+        if (await page.locator(selector).isVisible({ timeout: 1000 })) {
+          modalVisible = true;
+          break;
+        }
+      } catch (e) {
+        continue;
+      }
+    }
   } catch (e) {
     console.log(`⚠️ Modal check error:`, e.message);
   }
@@ -386,8 +465,24 @@ export async function handleInviteModal(page) {
     if (await sendWithoutNoteBtn.isVisible()) {
       console.log(`📨 Sending invitation without note...`);
       await sendWithoutNoteBtn.click();
-      await page.waitForTimeout(2000);
-      return true;
+      
+      // Verify invite was sent by checking for Pending button
+      console.log('🔍 Verifying invite was sent...');
+      await page.waitForTimeout(3000); // Wait for page to update
+      
+      try {
+        const pendingButton = page.locator('button:has-text("Pending")').first();
+        if (await pendingButton.isVisible({ timeout: 3000 })) {
+          console.log('✅ Invite verified - Pending button appeared');
+          return true;
+        } else {
+          console.log('❌ Verification failed - Pending button not found');
+          return false;
+        }
+      } catch (error) {
+        console.log('❌ Verification error:', error.message);
+        return false;
+      }
     } else {
       console.log(`❌ Send without note button not found`);
       return false;
@@ -499,9 +594,61 @@ export async function processInvitesDirectly(context, page, leads, customMessage
       const connectButton = await findConnectButton(page);
       
       if (!connectButton) {
+        console.log(`🔍 Connect button not found, verifying connection status...`);
+        
+        // Step 1: Check if Pending (invite already sent)
+        let isPending = false;
+        try {
+          const pendingButton = page.locator('button:has-text("Pending")').first();
+          if (await pendingButton.isVisible({ timeout: 2000 })) {
+            console.log(`⏳ ALREADY PENDING: ${lead.name}`);
+            results.alreadyPending++;
+            await updateLeadStatus(campaignId, lead.id, 'sent', true);
+            isPending = true;
+          }
+        } catch (e) {
+          // Not pending
+        }
+        
+        if (isPending) {
+          continue; // Move to next lead
+        }
+        
+        // Step 2: Check for "Remove connection" (definitive proof of connection)
+        let isConnected = false;
+        const connectionIndicators = [
+          'button:has-text("Remove connection")',
+          'div:has-text("Remove connection")',
+          'span:has-text("Remove connection")',
+          'button[aria-label*="Remove connection"]'
+        ];
+        
+        for (const selector of connectionIndicators) {
+          try {
+            const indicator = page.locator(selector).first();
+            if (await indicator.isVisible({ timeout: 1000 })) {
+              console.log(`✅ ALREADY CONNECTED: ${lead.name} (Found connection indicator: ${selector})`);
+              console.log(`📝 Marking as ACCEPTED`);
+              results.alreadyConnected++;
+              await updateLeadStatus(campaignId, lead.id, 'accepted', true);
+              isConnected = true;
+              break;
+            }
+          } catch (e) {
+            continue;
+          }
+        }
+        
+        if (isConnected) {
+          continue; // Move to next lead
+        }
+        
+        // Step 3: If no Connect, no Pending, and no explicit connection indicator found
+        // This person might be Following or other state - mark as failed
         console.log(`❌ NO CONNECT BUTTON: ${lead.name}`);
+        console.log(`⚠️ No Pending or connection indicator found - not connected`);
         results.failed++;
-        results.errors.push({ leadId: lead.id, name: lead.name, error: 'Connect button not found' });
+        results.errors.push({ leadId: lead.id, name: lead.name, error: 'Connect button not found - possibly Following or restricted' });
         await updateLeadStatus(campaignId, lead.id, 'failed', false);
         continue;
       }
@@ -539,10 +686,9 @@ export async function processInvitesDirectly(context, page, leads, customMessage
       
       if (inviteSent) {
         results.sent++;
-        // Use GLOBAL update - this invite is sent for ALL campaigns with this URL
-        await updateLeadStatusGlobally(lead.url, 'sent', true);
+        // Update this lead in this campaign
+        await updateLeadStatus(campaignId, lead.id, 'sent', true);
         console.log(`✅ INVITE SENT: ${lead.name || 'Lead'}`);
-        console.log(`🌍 Syncing invite status globally across all campaigns`);
       } else {
         results.failed++;
         results.errors.push({ leadId: lead.id, name: lead.name, error: 'Failed to send invite via modal' });
