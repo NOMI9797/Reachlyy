@@ -537,9 +537,10 @@ async function inspectPageButtons(page) {
  * @param {Array} leads - Array of lead objects
  * @param {string} customMessage - Custom message (not used, always send without note)
  * @param {string} campaignId - Campaign ID
+ * @param {Function} progressCallback - Optional callback for progress updates
  * @returns {Promise<Object>} - Results object with counts
  */
-export async function processInvitesDirectly(context, page, leads, customMessage, campaignId) {
+export async function processInvitesDirectly(context, page, leads, customMessage, campaignId, progressCallback = null) {
   console.log(`🚀 STEP 5: Processing ${leads.length} invite(s) directly...`);
   
   const results = {
@@ -688,6 +689,21 @@ export async function processInvitesDirectly(context, page, leads, customMessage
       results.failed++;
       results.errors.push({ leadId: lead.id, name: lead.name, error: error.message });
       await updateLeadStatus(campaignId, lead.id, 'failed', false);
+    }
+    
+    // ✅ Emit progress after each lead (success or failure)
+    if (progressCallback && typeof progressCallback === 'function') {
+      try {
+        await progressCallback({
+          type: 'progress',
+          current: i + 1,
+          total: leads.length,
+          leadName: lead.name,
+          leadId: lead.id
+        });
+      } catch (cbError) {
+        console.error(`⚠️ Progress callback error:`, cbError.message);
+      }
     }
   }
 
