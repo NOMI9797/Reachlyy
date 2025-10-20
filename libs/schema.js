@@ -116,6 +116,24 @@ export const linkedinAccounts = pgTable('linkedin_accounts', {
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 
+// Workflow Jobs table - for background processing
+export const workflowJobs = pgTable('workflow_jobs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  campaignId: uuid('campaign_id').references(() => campaigns.id, { onDelete: 'cascade' }).notNull(),
+  userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
+  accountId: uuid('account_id').references(() => linkedinAccounts.id, { onDelete: 'cascade' }).notNull(),
+  status: varchar('status', { length: 20 }).default('queued').notNull(), // queued, processing, completed, failed
+  progress: integer('progress').default(0), // 0-100
+  totalLeads: integer('total_leads'),
+  processedLeads: integer('processed_leads').default(0),
+  results: json('results'), // Store final results as JSON
+  errorMessage: text('error_message'),
+  customMessage: text('custom_message'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  startedAt: timestamp('started_at'),
+  completedAt: timestamp('completed_at'),
+});
+
 // Database initialization function
 export async function initializeDatabase() {
   const { migrate } = await import('drizzle-orm/postgres-js/migrator');
