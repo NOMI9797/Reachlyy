@@ -52,6 +52,7 @@
     "reactflow": "^11.11.4",
     "sharp": "^0.34.4",
     "stripe": "^13.11.0",
+    "tsx": "^4.20.6",
     "uuid": "^13.0.0"
   },
   "devDependencies": {
