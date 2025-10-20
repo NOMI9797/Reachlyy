@@ -169,24 +169,39 @@ export default function SendInviteCanvas({ campaignName, campaignId }) {
         if (response.status === 409 && errorData.jobId) {
           console.log(`🔄 Found existing running job: ${errorData.jobId}`);
           
-          setCurrentJobId(errorData.jobId);
-          localStorage.setItem('currentJobId', errorData.jobId);
-          localStorage.setItem('currentCampaignId', campaignId);
-          
-          setProgress({ 
-            current: errorData.processedLeads || 0, 
-            total: errorData.totalLeads || 0 
-          });
-          
-          setActivationStatus({ 
-            type: 'info', 
-            message: '🔄 Workflow already running',
-            details: `Resuming existing workflow (${errorData.progress || 0}% complete). Progress: ${errorData.processedLeads || 0}/${errorData.totalLeads || 0}`
-          });
-          
-          // Start polling the existing job
-          startPolling(errorData.jobId);
-          return;
+          // Check if it's for the same campaign or a different one
+          if (errorData.isSameCampaign) {
+            // Same campaign - resume polling
+            setCurrentJobId(errorData.jobId);
+            localStorage.setItem('currentJobId', errorData.jobId);
+            localStorage.setItem('currentCampaignId', campaignId);
+            
+            setProgress({ 
+              current: errorData.processedLeads || 0, 
+              total: errorData.totalLeads || 0 
+            });
+            
+            setActivationStatus({ 
+              type: 'info', 
+              message: '🔄 Workflow already running',
+              details: `Resuming existing workflow (${errorData.progress || 0}% complete). Progress: ${errorData.processedLeads || 0}/${errorData.totalLeads || 0}`
+            });
+            
+            // Start polling the existing job
+            startPolling(errorData.jobId);
+            return;
+          } else {
+            // Different campaign - show error and don't proceed
+            setActivationStatus({ 
+              type: 'warning', 
+              message: '⚠️ Another workflow is running',
+              details: `Workflow for campaign "${errorData.campaignName || 'Unknown'}" is currently running (${errorData.progress || 0}% complete). Please wait for it to finish before starting a new one.`
+            });
+            
+            setIsRunning(false);
+            setIsProcessing(false);
+            return;
+          }
         }
         
         throw new Error(errorData.message || `HTTP error! status: ${response.status}`);

@@ -62,28 +62,42 @@ export const POST = withAuth(async (request, { params, user }) => {
     console.log(`✅ Active account: ${activeAccount.email} (${accountId})`);
     
     // ============================================================
-    // STEP 3: Check for Existing Running Job (Prevent Duplicates)
+    // STEP 3: Check for Existing Running Job (One Job Per User)
     // ============================================================
-    console.log(`🔍 STEP 3: Checking for existing running job...`);
+    console.log(`🔍 STEP 3: Checking for existing running job (any campaign)...`);
     
+    // Check if user has ANY running job (not just for this campaign)
     const existingJob = await db.query.workflowJobs.findFirst({
       where: and(
-        eq(workflowJobs.campaignId, campaignId),
         eq(workflowJobs.userId, user.id),
         inArray(workflowJobs.status, ['queued', 'processing'])
       )
     });
     
     if (existingJob) {
-      console.log(`⚠️  Existing job found: ${existingJob.id} (status: ${existingJob.status})`);
+      console.log(`⚠️  User already has a running job: ${existingJob.id}`);
+      console.log(`⚠️  Job campaign: ${existingJob.campaignId}, status: ${existingJob.status}`);
+      
+      // Get campaign name for better user message
+      const runningCampaign = await db.query.campaigns.findFirst({
+        where: eq(campaigns.id, existingJob.campaignId)
+      });
+      
+      const isSameCampaign = existingJob.campaignId === campaignId;
+      
       return NextResponse.json({
         error: 'WORKFLOW_ALREADY_RUNNING',
-        message: 'A workflow is already running for this campaign',
+        message: isSameCampaign 
+          ? 'A workflow is already running for this campaign'
+          : `Another workflow is already running for campaign "${runningCampaign?.name || 'Unknown'}". Please wait for it to complete.`,
         jobId: existingJob.id,
+        campaignId: existingJob.campaignId,
+        campaignName: runningCampaign?.name,
         status: existingJob.status,
         progress: existingJob.progress || 0,
         processedLeads: existingJob.processedLeads || 0,
-        totalLeads: existingJob.totalLeads || 0
+        totalLeads: existingJob.totalLeads || 0,
+        isSameCampaign
       }, { status: 409 });
     }
     
