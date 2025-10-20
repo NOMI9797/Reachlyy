@@ -146,14 +146,11 @@ export default function SendInviteCanvas({ campaignName, campaignId }) {
     // Clear any old job data before starting new workflow
     localStorage.removeItem('currentJobId');
     localStorage.removeItem('currentCampaignId');
-    console.log('🧹 Cleared old job data from localStorage');
 
     setIsRunning(true);
     setActivationStatus(null);
     setProgress({ current: 0, total: 0 });
     setIsProcessing(true);
-
-    console.log(`🚀 Starting BACKGROUND workflow for campaign: ${campaignId}`);
 
     try {
       // Start workflow (returns immediately)
@@ -167,6 +164,31 @@ export default function SendInviteCanvas({ campaignName, campaignId }) {
 
       if (!response.ok) {
         const errorData = await response.json();
+        
+        // Handle existing workflow case (409 Conflict)
+        if (response.status === 409 && errorData.jobId) {
+          console.log(`🔄 Found existing running job: ${errorData.jobId}`);
+          
+          setCurrentJobId(errorData.jobId);
+          localStorage.setItem('currentJobId', errorData.jobId);
+          localStorage.setItem('currentCampaignId', campaignId);
+          
+          setProgress({ 
+            current: errorData.processedLeads || 0, 
+            total: errorData.totalLeads || 0 
+          });
+          
+          setActivationStatus({ 
+            type: 'info', 
+            message: '🔄 Workflow already running',
+            details: `Resuming existing workflow (${errorData.progress || 0}% complete). Progress: ${errorData.processedLeads || 0}/${errorData.totalLeads || 0}`
+          });
+          
+          // Start polling the existing job
+          startPolling(errorData.jobId);
+          return;
+        }
+        
         throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
       }
 
@@ -257,23 +279,25 @@ export default function SendInviteCanvas({ campaignName, campaignId }) {
           localStorage.removeItem('currentJobId');
           localStorage.removeItem('currentCampaignId');
           
-        } else if (status.status === 'failed') {
+        } else if (status.status === 'failed' || status.status === 'timeout') {
           clearInterval(pollIntervalRef.current);
           pollIntervalRef.current = null;
           setIsRunning(false);
           setIsProcessing(false);
           
+          const isTimeout = status.status === 'timeout';
+          
           setActivationStatus({ 
             type: 'error', 
-            message: '❌ Workflow failed', 
-            details: status.errorMessage 
+            message: isTimeout ? '⏱️ Workflow timed out' : '❌ Workflow failed', 
+            details: status.errorMessage || (isTimeout ? 'The workflow took too long and may have crashed. Please try again.' : 'An error occurred during workflow execution.')
           });
           
           // Clear localStorage
           localStorage.removeItem('currentJobId');
           localStorage.removeItem('currentCampaignId');
           
-          console.error(`❌ Workflow failed: ${status.errorMessage}`);
+          console.error(`❌ Workflow ${status.status}: ${status.errorMessage}`);
         }
       } catch (pollError) {
         console.error('❌ Poll error:', pollError);

@@ -11,7 +11,7 @@ import { NextResponse } from "next/server";
 import { withAuth } from "@/libs/auth-middleware";
 import { db } from "@/libs/db";
 import { workflowJobs, campaigns, linkedinAccounts } from "@/libs/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, inArray } from "drizzle-orm";
 import { spawn } from "child_process";
 import path from "path";
 import LinkedInSessionManager from "@/libs/linkedin-session";
@@ -62,9 +62,37 @@ export const POST = withAuth(async (request, { params, user }) => {
     console.log(`✅ Active account: ${activeAccount.email} (${accountId})`);
     
     // ============================================================
-    // STEP 3: Create Workflow Job
+    // STEP 3: Check for Existing Running Job (Prevent Duplicates)
     // ============================================================
-    console.log(`💾 STEP 3: Creating workflow job in database...`);
+    console.log(`🔍 STEP 3: Checking for existing running job...`);
+    
+    const existingJob = await db.query.workflowJobs.findFirst({
+      where: and(
+        eq(workflowJobs.campaignId, campaignId),
+        eq(workflowJobs.userId, user.id),
+        inArray(workflowJobs.status, ['queued', 'processing'])
+      )
+    });
+    
+    if (existingJob) {
+      console.log(`⚠️  Existing job found: ${existingJob.id} (status: ${existingJob.status})`);
+      return NextResponse.json({
+        error: 'WORKFLOW_ALREADY_RUNNING',
+        message: 'A workflow is already running for this campaign',
+        jobId: existingJob.id,
+        status: existingJob.status,
+        progress: existingJob.progress || 0,
+        processedLeads: existingJob.processedLeads || 0,
+        totalLeads: existingJob.totalLeads || 0
+      }, { status: 409 });
+    }
+    
+    console.log(`✅ No existing job found, creating new job...`);
+    
+    // ============================================================
+    // STEP 4: Create Workflow Job
+    // ============================================================
+    console.log(`💾 STEP 4: Creating workflow job in database...`);
     
     const [job] = await db.insert(workflowJobs).values({
       campaignId,
