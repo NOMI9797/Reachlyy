@@ -294,18 +294,26 @@ export default function SendInviteCanvas({ campaignName, campaignId }) {
             console.log(`🎉 Workflow completed!`);
           }
           
+          console.log(`✅ Polling stopped - Job completed`);
+          
           // Clear localStorage
           localStorage.removeItem('currentJobId');
           localStorage.removeItem('currentCampaignId');
           
         } else if (status.status === 'paused') {
-          // Don't stop polling - just update UI
+          // STOP POLLING - Job is idle
+          clearInterval(pollIntervalRef.current);
+          pollIntervalRef.current = null;
+          setIsRunning(false);
+          setIsProcessing(false);
+          
           setActivationStatus({
             type: 'info',
             message: '⏸️ Workflow paused',
             details: 'Click Resume to continue where you left off.'
           });
-          setIsProcessing(false);
+          
+          console.log(`⏸️ Polling stopped - Job paused (idle state)`);
           
         } else if (status.status === 'cancelled') {
           clearInterval(pollIntervalRef.current);
@@ -322,6 +330,8 @@ export default function SendInviteCanvas({ campaignName, campaignId }) {
           // Reset all state after cancellation
           setCurrentJobId(null);
           setProgress({ current: 0, total: 0 });
+          
+          console.log(`🛑 Polling stopped - Job cancelled`);
           
           // Clear localStorage
           localStorage.removeItem('currentJobId');
@@ -342,6 +352,8 @@ export default function SendInviteCanvas({ campaignName, campaignId }) {
             message: isTimeout ? '⏱️ Workflow timed out' : '❌ Workflow failed', 
             details: status.errorMessage || (isTimeout ? 'The workflow took too long and may have crashed. Please try again.' : 'An error occurred during workflow execution.')
           });
+          
+          console.log(`❌ Polling stopped - Job ${isTimeout ? 'timed out' : 'failed'}`);
           
           // Clear localStorage
           localStorage.removeItem('currentJobId');
@@ -418,6 +430,10 @@ export default function SendInviteCanvas({ campaignName, campaignId }) {
       // Set processing state
       setIsRunning(true);
       setIsProcessing(true);
+      
+      // Restart polling for resumed job
+      console.log(`🔄 Restarting polling for resumed job: ${currentJobId.substring(0, 8)}...`);
+      startPolling(currentJobId);
       
     } catch (error) {
       console.error('❌ Resume error:', error);
