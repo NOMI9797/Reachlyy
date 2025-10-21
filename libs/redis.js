@@ -282,4 +282,8 @@ export class RedisStreamManager {
   }
 }
 
+// Export default and named exports
 export default getRedisClient;
+
+// Export singleton redis instance for direct use in API routes
+export const redis = getRedisClient();
