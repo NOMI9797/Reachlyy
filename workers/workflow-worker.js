@@ -245,29 +245,6 @@ async function runJob() {
       
       console.log(`\n📦 Batch ${batchIndex + 1}/${batches.length} | ${batch.length} leads`);
       
-      // FALLBACK: DB check every 10 batches (only if Redis unavailable)
-      // Note: With Redis Pub/Sub enabled, process.exit() is called directly in the callback
-      if (!useRedisControl && batchIndex % 10 === 0) {
-        console.log('🔍 [FALLBACK] Checking job status via DB...');
-        const currentJob = await db.query.workflowJobs.findFirst({
-          where: eq(workflowJobs.id, jobId)
-        });
-        
-        if (currentJob.status === 'paused' || currentJob.status === 'cancelled') {
-          console.log(`🛑 Job ${currentJob.status} (detected via DB fallback)`);
-          console.log(`   Exiting immediately`);
-          
-          // Close browser if open
-          if (batchContext) {
-            console.log('🔒 Closing browser before exit...');
-            await cleanupBrowserSession(batchContext);
-          }
-          
-          console.log(`👋 Exit: 0 (${currentJob.status})`);
-          process.exit(0);
-        }
-      }
-      
       try {
         // Validate Session (Open Browser)
         const sessionResult = await testLinkedInSession(accountData, true);
@@ -289,6 +266,7 @@ async function runJob() {
             const progress = Math.round((currentLeadIndex / leadsToProcess.length) * 100);
             
             try {
+              // Update progress
               await db.update(workflowJobs)
                 .set({ 
                   processedLeads: currentLeadIndex,
@@ -297,29 +275,75 @@ async function runJob() {
                 .where(eq(workflowJobs.id, jobId));
               
               console.log(`  📊 Progress: ${currentLeadIndex}/${leadsToProcess.length} (${progress}%)`);
+              
+              // 🔥 FALLBACK: Check for pause/cancel after every lead if Redis is unavailable
+              if (!useRedisControl) {
+                const currentJob = await db.query.workflowJobs.findFirst({
+                  where: eq(workflowJobs.id, jobId),
+                  columns: { status: true }  // Only fetch status column (optimization)
+                });
+                
+                if (currentJob && (currentJob.status === 'paused' || currentJob.status === 'cancelled')) {
+                  console.log(`🛑 [FALLBACK] Job ${currentJob.status} detected during lead processing`);
+                  console.log(`   Exiting after lead ${currentLeadIndex}/${leadsToProcess.length}`);
+                  
+                  // Throw error to break out of invite processing loop
+                  throw new Error(`WORKFLOW_${currentJob.status.toUpperCase()}`);
+                }
+              }
+              
             } catch (dbError) {
+              // Re-throw workflow control errors (pause/cancel)
+              if (dbError.message && dbError.message.startsWith('WORKFLOW_')) {
+                throw dbError;
+              }
+              // Log other DB errors but don't stop workflow
               console.error(`  ❌ DB update failed:`, dbError.message);
             }
           }
         };
         
         // Process invites (reuses existing automation logic)
-        const batchResults = await processInvitesDirectly(
-          batchContext,
-          batchPage,
-          batch,
-          job.customMessage || "Hi! I'd like to connect with you.",
-          job.campaignId,
-          progressCallback
-        );
-        
-        // Aggregate results
-        totalSent += batchResults.sent;
-        totalFailed += batchResults.failed;
-        totalAlreadyConnected += batchResults.alreadyConnected;
-        totalAlreadyPending += batchResults.alreadyPending;
-        
-        console.log(`  ✅ Sent: ${batchResults.sent} | Failed: ${batchResults.failed}`);
+        try {
+          const batchResults = await processInvitesDirectly(
+            batchContext,
+            batchPage,
+            batch,
+            job.customMessage || "Hi! I'd like to connect with you.",
+            job.campaignId,
+            progressCallback
+          );
+          
+          // Aggregate results
+          totalSent += batchResults.sent;
+          totalFailed += batchResults.failed;
+          totalAlreadyConnected += batchResults.alreadyConnected;
+          totalAlreadyPending += batchResults.alreadyPending;
+          
+          console.log(`  ✅ Sent: ${batchResults.sent} | Failed: ${batchResults.failed}`);
+          
+        } catch (processError) {
+          // Handle workflow control signals (pause/cancel via DB fallback)
+          if (processError.message === 'WORKFLOW_PAUSED' || processError.message === 'WORKFLOW_CANCELLED') {
+            const action = processError.message.replace('WORKFLOW_', '').toLowerCase();
+            console.log(`🛑 Workflow ${action} - cleaning up and exiting`);
+            
+            // Close browser gracefully
+            if (batchContext) {
+              console.log('🔒 Closing browser before exit...');
+              await cleanupBrowserSession(batchContext);
+            }
+            
+            // Cleanup Redis
+            await cleanupRedisSubscriber();
+            
+            console.log(`👋 Exit: 0 (${action})`);
+            process.exit(0);
+          }
+          
+          // Other processing errors - re-throw to batch error handler
+          throw processError;
+        }
         
         // Increment daily counter for successfully sent invites
         if (batchResults.sent > 0) {
