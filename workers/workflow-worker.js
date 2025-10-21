@@ -109,6 +109,12 @@ async function runJob() {
     
     console.log(`📦 Batches: ${batches.length} × ${BATCH_SIZE} leads`);
     
+    // Check if this is a resume (processedLeads > 0)
+    const isResume = job.processedLeads > 0;
+    if (isResume) {
+      console.log(`🔄 Resuming from lead ${job.processedLeads + 1}/${leadsToProcess.length}`);
+    }
+    
     // Update total leads in job
     await db.update(workflowJobs)
       .set({ totalLeads: leadsToProcess.length })
@@ -121,13 +127,35 @@ async function runJob() {
     let totalFailed = 0;
     let totalAlreadyConnected = 0;
     let totalAlreadyPending = 0;
-    let currentLeadIndex = 0;
+    let currentLeadIndex = isResume ? job.processedLeads : 0;
     
     for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
       const batch = batches[batchIndex];
       let batchContext = null;
       
+      // Skip batches that were already processed (for resume functionality)
+      const batchStartIndex = batchIndex * BATCH_SIZE;
+      if (isResume && batchStartIndex < job.processedLeads) {
+        console.log(`⏭️  Skipping batch ${batchIndex + 1} (already processed)`);
+        continue;
+      }
+      
       console.log(`\n📦 Batch ${batchIndex + 1}/${batches.length} | ${batch.length} leads`);
+      
+      // Check if job has been paused or cancelled BEFORE processing batch
+      const currentJob = await db.query.workflowJobs.findFirst({
+        where: eq(workflowJobs.id, jobId)
+      });
+      
+      if (currentJob.status === 'paused') {
+        console.log(`⏸️  Job paused by user | Exit: 0`);
+        process.exit(0);
+      }
+      
+      if (currentJob.status === 'cancelled') {
+        console.log(`🛑 Job cancelled by user | Exit: 0`);
+        process.exit(0);
+      }
       
       try {
         // Validate Session (Open Browser)

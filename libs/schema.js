@@ -122,7 +122,7 @@ export const workflowJobs = pgTable('workflow_jobs', {
   campaignId: uuid('campaign_id').references(() => campaigns.id, { onDelete: 'cascade' }).notNull(),
   userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
   accountId: uuid('account_id').references(() => linkedinAccounts.id, { onDelete: 'cascade' }).notNull(),
-  status: varchar('status', { length: 20 }).default('queued').notNull(), // queued, processing, completed, failed
+  status: varchar('status', { length: 20 }).default('queued').notNull(), // queued, processing, paused, cancelled, completed, failed, timeout
   progress: integer('progress').default(0), // 0-100
   totalLeads: integer('total_leads'),
   processedLeads: integer('processed_leads').default(0),
@@ -132,6 +132,9 @@ export const workflowJobs = pgTable('workflow_jobs', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
   startedAt: timestamp('started_at'),
   completedAt: timestamp('completed_at'),
+  pausedAt: timestamp('paused_at'), // When job was paused
+  resumedAt: timestamp('resumed_at'), // When job was last resumed
+  pauseCount: integer('pause_count').default(0), // Number of times paused
 });
 
 // Database initialization function
