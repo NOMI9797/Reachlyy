@@ -16,9 +16,7 @@ import { workflowJobs, linkedinAccounts } from '../libs/schema';
 import { eq } from 'drizzle-orm';
 import { createClient } from 'redis';
 
-// Global control flags for event-driven job control
-let shouldExit = false;
-let exitReason = null;
+// Global Redis subscriber for event-driven job control
 let redisSubscriber = null;
 
 const jobId = process.argv[2];
@@ -53,7 +51,7 @@ async function setupControlListener(jobId) {
     const channel = `job:${jobId}:control`;
     
     // Subscribe to control channel
-    await redisSubscriber.subscribe(channel, (message) => {
+    await redisSubscriber.subscribe(channel, async (message) => {
       try {
         const data = JSON.parse(message);
         const timestamp = new Date().toISOString();
@@ -65,14 +63,17 @@ async function setupControlListener(jobId) {
         console.log(`   Source: ${data.userId || 'unknown'}`);
         console.log(`   Latency: ~${latency}ms`);
         
-        if (data.action === 'cancel') {
-          console.log(`🛑 [CONTROL] Setting exit flag: CANCELLED`);
-          shouldExit = true;
-          exitReason = 'cancelled';
-        } else if (data.action === 'pause') {
-          console.log(`⏸️  [CONTROL] Setting exit flag: PAUSED`);
-          shouldExit = true;
-          exitReason = 'paused';
+        if (data.action === 'cancel' || data.action === 'pause') {
+          const actionName = data.action.toUpperCase();
+          console.log(`🛑 [CONTROL] ${actionName} signal received - EXITING IMMEDIATELY`);
+          console.log(`   Event-driven exit via Redis Pub/Sub`);
+          
+          // Cleanup Redis connection
+          await cleanupRedisSubscriber();
+          
+          // Exit immediately - truly event-driven!
+          console.log(`👋 Exit: 0 (${data.action})`);
+          process.exit(0);
         }
       } catch (parseError) {
         console.error('❌ Failed to parse Redis message:', parseError.message);
@@ -244,42 +245,26 @@ async function runJob() {
       
       console.log(`\n📦 Batch ${batchIndex + 1}/${batches.length} | ${batch.length} leads`);
       
-      // Check exit flag (instant - no DB query!)
-      if (shouldExit) {
-        console.log(`\n🛑 [EXIT TRIGGERED] Reason: ${exitReason.toUpperCase()}`);
-        console.log(`   Batch: ${batchIndex + 1}/${batches.length}`);
-        console.log(`   Processed: ${currentLeadIndex}/${leadsToProcess.length}`);
-        console.log(`   Source: ${useRedisControl ? 'Redis Pub/Sub (<100ms)' : 'DB Polling'}`);
-        
-        // Close browser if open
-        if (batchContext) {
-          console.log('🔒 Closing browser before exit...');
-          await cleanupBrowserSession(batchContext);
-        }
-        
-        console.log(`👋 Exit: 0 (${exitReason})`);
-        process.exit(0);
-      }
-      
-      // FALLBACK: DB check every 10 batches (in case Redis fails)
+      // FALLBACK: DB check every 10 batches (only if Redis unavailable)
+      // Note: With Redis Pub/Sub enabled, process.exit() is called directly in the callback
       if (!useRedisControl && batchIndex % 10 === 0) {
         console.log('🔍 [FALLBACK] Checking job status via DB...');
         const currentJob = await db.query.workflowJobs.findFirst({
           where: eq(workflowJobs.id, jobId)
         });
         
-        if (currentJob.status === 'paused') {
-          console.log(`⏸️  Job paused (detected via DB fallback)`);
-          shouldExit = true;
-          exitReason = 'paused';
-          continue; // Will exit on next iteration
-        }
-        
-        if (currentJob.status === 'cancelled') {
-          console.log(`🛑 Job cancelled (detected via DB fallback)`);
-          shouldExit = true;
-          exitReason = 'cancelled';
-          continue; // Will exit on next iteration
+        if (currentJob.status === 'paused' || currentJob.status === 'cancelled') {
+          console.log(`🛑 Job ${currentJob.status} (detected via DB fallback)`);
+          console.log(`   Exiting immediately`);
+          
+          // Close browser if open
+          if (batchContext) {
+            console.log('🔒 Closing browser before exit...');
+            await cleanupBrowserSession(batchContext);
+          }
+          
+          console.log(`👋 Exit: 0 (${currentJob.status})`);
+          process.exit(0);
         }
       }
       
