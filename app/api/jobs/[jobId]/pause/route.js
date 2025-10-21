@@ -4,7 +4,7 @@ import { authOptions } from '@/libs/next-auth';
 import { db } from '@/libs/db';
 import { workflowJobs } from '@/libs/schema';
 import { eq, and, sql } from 'drizzle-orm';
-import { redis } from '@/libs/redis';
+import getRedisClient from '@/libs/redis';
 
 /**
  * POST /api/jobs/[jobId]/pause
@@ -60,6 +60,7 @@ export async function POST(request, { params }) {
 
     // Publish to Redis for instant worker notification
     try {
+      const redis = getRedisClient();
       await redis.publish(
         `job:${jobId}:control`,
         JSON.stringify({
