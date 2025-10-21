@@ -4,6 +4,7 @@ import { authOptions } from '@/libs/next-auth';
 import { db } from '@/libs/db';
 import { workflowJobs } from '@/libs/schema';
 import { eq, and } from 'drizzle-orm';
+import { redis } from '@/libs/redis';
 
 /**
  * POST /api/jobs/[jobId]/cancel
@@ -56,6 +57,22 @@ export async function POST(request, { params }) {
       .returning();
 
     console.log(`🛑 Job cancelled: ${jobId.substring(0, 8)}... | Progress: ${job.processedLeads}/${job.totalLeads}`);
+
+    // Publish to Redis for instant worker notification
+    try {
+      await redis.publish(
+        `job:${jobId}:control`,
+        JSON.stringify({
+          action: 'cancel',
+          timestamp: new Date().toISOString(),
+          userId: session.user.id
+        })
+      );
+      console.log(`📢 Published CANCEL signal to Redis | Job: ${jobId.substring(0, 8)}...`);
+    } catch (redisError) {
+      console.error('⚠️  Redis publish failed (worker will use DB fallback):', redisError.message);
+      // Don't fail the request - worker has DB fallback
+    }
 
     return NextResponse.json({
       success: true,

@@ -4,6 +4,7 @@ import { authOptions } from '@/libs/next-auth';
 import { db } from '@/libs/db';
 import { workflowJobs } from '@/libs/schema';
 import { eq, and, sql } from 'drizzle-orm';
+import { redis } from '@/libs/redis';
 
 /**
  * POST /api/jobs/[jobId]/pause
@@ -56,6 +57,23 @@ export async function POST(request, { params }) {
       .returning();
 
     console.log(`⏸️  Job paused: ${jobId.substring(0, 8)}... | Pause count: ${updatedJob[0].pauseCount}`);
+
+    // Publish to Redis for instant worker notification
+    try {
+      await redis.publish(
+        `job:${jobId}:control`,
+        JSON.stringify({
+          action: 'pause',
+          timestamp: new Date().toISOString(),
+          userId: session.user.id,
+          pauseCount: updatedJob[0].pauseCount
+        })
+      );
+      console.log(`📢 Published PAUSE signal to Redis | Job: ${jobId.substring(0, 8)}... | Count: ${updatedJob[0].pauseCount}`);
+    } catch (redisError) {
+      console.error('⚠️  Redis publish failed (worker will use DB fallback):', redisError.message);
+      // Don't fail the request - worker has DB fallback
+    }
 
     return NextResponse.json({
       success: true,

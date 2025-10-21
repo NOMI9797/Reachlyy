@@ -14,6 +14,12 @@ import { checkDailyLimit, incrementDailyCounter } from '../libs/rate-limit-manag
 import { db } from '../libs/db';
 import { workflowJobs, linkedinAccounts } from '../libs/schema';
 import { eq } from 'drizzle-orm';
+import { createClient } from 'redis';
+
+// Global control flags for event-driven job control
+let shouldExit = false;
+let exitReason = null;
+let redisSubscriber = null;
 
 const jobId = process.argv[2];
 
@@ -25,7 +31,93 @@ if (!jobId) {
 
 console.log(`🚀 Worker Started | Job: ${jobId.substring(0, 8)}... | PID: ${process.pid}`);
 
+/**
+ * Setup Redis Pub/Sub listener for instant job control
+ * Subscribes to job:{jobId}:control channel for pause/cancel signals
+ */
+async function setupControlListener(jobId) {
+  try {
+    // Create dedicated subscriber client
+    redisSubscriber = createClient({
+      url: process.env.REDIS_URL || 'redis://localhost:6379'
+    });
+
+    // Handle connection errors
+    redisSubscriber.on('error', (err) => {
+      console.error('⚠️  Redis Subscriber Error:', err.message);
+      // Don't crash - we have DB fallback
+    });
+
+    await redisSubscriber.connect();
+    
+    const channel = `job:${jobId}:control`;
+    
+    // Subscribe to control channel
+    await redisSubscriber.subscribe(channel, (message) => {
+      try {
+        const data = JSON.parse(message);
+        const timestamp = new Date().toISOString();
+        const latency = Date.now() - new Date(data.timestamp).getTime();
+        
+        console.log(`\n📡 [${timestamp}] Redis Signal Received`);
+        console.log(`   Action: ${data.action.toUpperCase()}`);
+        console.log(`   Job: ${jobId.substring(0, 8)}...`);
+        console.log(`   Source: ${data.userId || 'unknown'}`);
+        console.log(`   Latency: ~${latency}ms`);
+        
+        if (data.action === 'cancel') {
+          console.log(`🛑 [CONTROL] Setting exit flag: CANCELLED`);
+          shouldExit = true;
+          exitReason = 'cancelled';
+        } else if (data.action === 'pause') {
+          console.log(`⏸️  [CONTROL] Setting exit flag: PAUSED`);
+          shouldExit = true;
+          exitReason = 'paused';
+        }
+      } catch (parseError) {
+        console.error('❌ Failed to parse Redis message:', parseError.message);
+      }
+    });
+    
+    console.log(`📡 Subscribed to control channel: ${channel}`);
+    return true;
+    
+  } catch (error) {
+    console.error('⚠️  Redis subscription failed:', error.message);
+    console.log('⚠️  Falling back to DB polling for control signals');
+    return false;
+  }
+}
+
+/**
+ * Cleanup Redis subscriber connection
+ */
+async function cleanupRedisSubscriber() {
+  if (redisSubscriber) {
+    try {
+      await redisSubscriber.quit();
+      console.log('🔌 Redis subscriber disconnected');
+    } catch (error) {
+      console.error('⚠️  Error disconnecting Redis subscriber:', error.message);
+    }
+  }
+}
+
+// Handle process termination signals
+process.on('SIGTERM', async () => {
+  console.log('\n🛑 SIGTERM received - shutting down gracefully...');
+  await cleanupRedisSubscriber();
+  process.exit(0);
+});
+
+process.on('SIGINT', async () => {
+  console.log('\n🛑 SIGINT received - shutting down gracefully...');
+  await cleanupRedisSubscriber();
+  process.exit(0);
+});
+
 async function runJob() {
+  let useRedisControl = false;
   try {
     // Fetch Job from Database
     const job = await db.query.workflowJobs.findFirst({
@@ -42,6 +134,16 @@ async function runJob() {
     await db.update(workflowJobs)
       .set({ status: 'processing', startedAt: new Date() })
       .where(eq(workflowJobs.id, jobId));
+    
+    // Setup Redis control listener for instant pause/cancel
+    console.log('📡 Setting up real-time control listener...');
+    useRedisControl = await setupControlListener(jobId);
+    
+    if (useRedisControl) {
+      console.log('✅ Real-time control: ENABLED (Redis Pub/Sub)');
+    } else {
+      console.log('⚠️  Real-time control: DISABLED (using DB fallback)');
+    }
     
     // Get LinkedIn Account Data
     const accountData = await db.query.linkedinAccounts.findFirst({
@@ -142,19 +244,43 @@ async function runJob() {
       
       console.log(`\n📦 Batch ${batchIndex + 1}/${batches.length} | ${batch.length} leads`);
       
-      // Check if job has been paused or cancelled BEFORE processing batch
-      const currentJob = await db.query.workflowJobs.findFirst({
-        where: eq(workflowJobs.id, jobId)
-      });
-      
-      if (currentJob.status === 'paused') {
-        console.log(`⏸️  Job paused by user | Exit: 0`);
+      // Check exit flag (instant - no DB query!)
+      if (shouldExit) {
+        console.log(`\n🛑 [EXIT TRIGGERED] Reason: ${exitReason.toUpperCase()}`);
+        console.log(`   Batch: ${batchIndex + 1}/${batches.length}`);
+        console.log(`   Processed: ${currentLeadIndex}/${leadsToProcess.length}`);
+        console.log(`   Source: ${useRedisControl ? 'Redis Pub/Sub (<100ms)' : 'DB Polling'}`);
+        
+        // Close browser if open
+        if (batchContext) {
+          console.log('🔒 Closing browser before exit...');
+          await cleanupBrowserSession(batchContext);
+        }
+        
+        console.log(`👋 Exit: 0 (${exitReason})`);
         process.exit(0);
       }
       
-      if (currentJob.status === 'cancelled') {
-        console.log(`🛑 Job cancelled by user | Exit: 0`);
-        process.exit(0);
+      // FALLBACK: DB check every 10 batches (in case Redis fails)
+      if (!useRedisControl && batchIndex % 10 === 0) {
+        console.log('🔍 [FALLBACK] Checking job status via DB...');
+        const currentJob = await db.query.workflowJobs.findFirst({
+          where: eq(workflowJobs.id, jobId)
+        });
+        
+        if (currentJob.status === 'paused') {
+          console.log(`⏸️  Job paused (detected via DB fallback)`);
+          shouldExit = true;
+          exitReason = 'paused';
+          continue; // Will exit on next iteration
+        }
+        
+        if (currentJob.status === 'cancelled') {
+          console.log(`🛑 Job cancelled (detected via DB fallback)`);
+          shouldExit = true;
+          exitReason = 'cancelled';
+          continue; // Will exit on next iteration
+        }
       }
       
       try {
@@ -284,6 +410,10 @@ async function runJob() {
     
     console.log(`👋 Exit: 1\n`);
     process.exit(1);
+    
+  } finally {
+    // Always cleanup Redis subscriber
+    await cleanupRedisSubscriber();
   }
 }
 
