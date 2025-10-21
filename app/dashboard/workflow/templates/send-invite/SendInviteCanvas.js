@@ -692,65 +692,67 @@ export default function SendInviteCanvas({ campaignName, campaignId }) {
     return () => window.removeEventListener('deleteNode', handleDeleteNode);
   }, [deleteNode]);
 
-  // Resume polling on mount if there's an ongoing job
+  // Check for active jobs on mount (handles navigation back to campaign with paused job)
   useEffect(() => {
-    const savedJobId = localStorage.getItem('currentJobId');
-    const savedCampaignId = localStorage.getItem('currentCampaignId');
-    
-    if (savedJobId && savedCampaignId === campaignId) {
-      console.log(`🔄 Found saved job: ${savedJobId}, resuming polling...`);
+    const checkForActiveJob = async () => {
+      if (!campaignId) return;
       
-      // Fetch current job status
-      fetch(`/api/jobs/${savedJobId}/status`)
-        .then(res => res.json())
-        .then(status => {
-          if (status.status === 'processing' || status.status === 'queued' || status.status === 'paused') {
-            setCurrentJobId(savedJobId);
-            setStatus(status);
-            setIsRunning(status.status !== 'paused');
-            setIsProcessing(status.status === 'processing');
-            setProgress({ current: status.processedLeads || 0, total: status.totalLeads || 0 });
-            
-            if (status.status === 'paused') {
-              setActivationStatus({ 
-                type: 'info', 
-                message: '⏸️ Workflow paused',
-                details: 'Click Resume to continue where you left off.'
-              });
-            } else {
-              setActivationStatus({ 
-                type: 'info', 
-                message: '🔄 Resuming workflow progress...',
-                details: 'Your workflow is still running in the background.'
-              });
-            }
-            startPolling(savedJobId);
-          } else if (status.status === 'completed') {
-            setActivationStatus({ 
-              type: 'success', 
-              message: '✅ Workflow completed while you were away!',
-              details: status.results ? 
-                `Sent: ${status.results.sent}, Already Connected: ${status.results.alreadyConnected}, Already Pending: ${status.results.alreadyPending}, Failed: ${status.results.failed}` : 
-                'Workflow completed successfully'
+      try {
+        console.log(`🔍 Checking for active jobs for campaign: ${campaignId.substring(0, 8)}...`);
+        
+        // Check database for any active job for this campaign
+        const response = await fetch(`/api/campaigns/${campaignId}/active-job`);
+        
+        if (!response.ok) {
+          console.log('No active job found or error checking');
+          return;
+        }
+        
+        const { job } = await response.json();
+        
+        if (job && ['processing', 'queued', 'paused'].includes(job.status)) {
+          console.log(`✅ Found active job: ${job.id.substring(0, 8)}... | Status: ${job.status}`);
+          
+          // Restore job state
+          setCurrentJobId(job.id);
+          setStatus({ ...job, status: job.status });
+          setIsRunning(job.status !== 'paused');
+          setIsProcessing(job.status === 'processing');
+          setProgress({ 
+            current: job.processedLeads || 0, 
+            total: job.totalLeads || 0 
+          });
+          
+          // Save to localStorage
+          localStorage.setItem('currentJobId', job.id);
+          localStorage.setItem('currentCampaignId', campaignId);
+          
+          // Show appropriate status message
+          if (job.status === 'paused') {
+            setActivationStatus({
+              type: 'info',
+              message: '⏸️ Workflow paused',
+              details: 'Click Resume to continue where you left off.'
             });
-            localStorage.removeItem('currentJobId');
-            localStorage.removeItem('currentCampaignId');
-          } else if (status.status === 'failed') {
-            setActivationStatus({ 
-              type: 'error', 
-              message: '❌ Workflow failed',
-              details: status.errorMessage
+          } else {
+            setActivationStatus({
+              type: 'info',
+              message: '🔄 Workflow in progress',
+              details: `Processing ${job.processedLeads || 0}/${job.totalLeads || 0} leads`
             });
-            localStorage.removeItem('currentJobId');
-            localStorage.removeItem('currentCampaignId');
           }
-        })
-        .catch(err => {
-          console.error('❌ Failed to resume job:', err);
-          localStorage.removeItem('currentJobId');
-          localStorage.removeItem('currentCampaignId');
-        });
-    }
+          
+          // Start polling
+          startPolling(job.id);
+        } else {
+          console.log('No active jobs found for this campaign');
+        }
+      } catch (error) {
+        console.error('❌ Error checking for active job:', error);
+      }
+    };
+    
+    checkForActiveJob();
     
     // Cleanup on unmount
     return () => {
