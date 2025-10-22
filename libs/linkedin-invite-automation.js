@@ -552,6 +552,11 @@ export async function processInvitesDirectly(context, page, leads, customMessage
     errors: []
   };
 
+  // Track counters for determining lead status in progressCallback
+  let initialSentCount = 0;
+  let initialAlreadyConnected = 0;
+  let initialAlreadyPending = 0;
+
   for (let i = 0; i < leads.length; i++) {
     const lead = leads[i];
     
@@ -692,6 +697,19 @@ export async function processInvitesDirectly(context, page, leads, customMessage
     }
     
     // ✅ Emit progress after each lead (success or failure)
+    // Track current lead status for accurate daily counter updates
+    let leadStatus = 'failed'; // Default to failed
+    if (results.sent > initialSentCount) {
+      leadStatus = 'sent'; // This lead was just sent successfully
+      initialSentCount = results.sent; // Update for next iteration
+    } else if (results.alreadyConnected > initialAlreadyConnected) {
+      leadStatus = 'already_connected';
+      initialAlreadyConnected = results.alreadyConnected;
+    } else if (results.alreadyPending > initialAlreadyPending) {
+      leadStatus = 'already_pending';
+      initialAlreadyPending = results.alreadyPending;
+    }
+    
     if (progressCallback && typeof progressCallback === 'function') {
       try {
         await progressCallback({
@@ -699,7 +717,8 @@ export async function processInvitesDirectly(context, page, leads, customMessage
           current: i + 1,
           total: leads.length,
           leadName: lead.name,
-          leadId: lead.id
+          leadId: lead.id,
+          status: leadStatus // ✅ Include status for daily counter tracking
         });
       } catch (cbError) {
         console.error(`⚠️ Progress callback error:`, cbError.message);

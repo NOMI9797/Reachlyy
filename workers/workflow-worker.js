@@ -264,13 +264,19 @@ async function runJob() {
             try {
               // Update progress
               await db.update(workflowJobs)
-                .set({ 
+                .set({
                   processedLeads: currentLeadIndex,
-                  progress 
+                  progress
                 })
                 .where(eq(workflowJobs.id, jobId));
               
               console.log(`  📊 Progress: ${currentLeadIndex}/${leadsToProcess.length} (${progress}%)`);
+              
+              // 🔥 Increment daily counter immediately for successfully sent invites
+              if (progressData.status === 'sent') {
+                await incrementDailyCounter(job.accountId, 1);
+                console.log(`  📊 Daily counter incremented (+1)`);
+              }
               
               // 🔥 FALLBACK: Check for pause/cancel after every lead if Redis is unavailable
               if (!useRedisControl) {
@@ -318,10 +324,8 @@ async function runJob() {
           
           console.log(`  ✅ Sent: ${batchResults.sent} | Failed: ${batchResults.failed}`);
           
-          // Increment daily counter for successfully sent invites
-          if (batchResults.sent > 0) {
-            await incrementDailyCounter(job.accountId, batchResults.sent);
-          }
+          // Note: Daily counter is now incremented per-lead in progressCallback (above)
+          // This ensures accurate tracking even if batch is interrupted by pause/cancel
           
         } catch (processError) {
           // Handle workflow control signals (pause/cancel via DB fallback)
