@@ -35,6 +35,9 @@ export default function AccountsPage() {
   const [linkedInCredentials, setLinkedInCredentials] = useState({ email: '', password: '' });
   const [showPassword, setShowPassword] = useState(false);
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' });
+  const [showLimitModal, setShowLimitModal] = useState(false);
+  const [selectedAccountForLimit, setSelectedAccountForLimit] = useState(null);
+  const [tempDailyLimit, setTempDailyLimit] = useState(30);
 
   // Use React Query hooks for LinkedIn accounts
   const {
@@ -43,8 +46,10 @@ export default function AccountsPage() {
     connectAccount,
     toggleAccountStatus,
     testAccountSession,
+    updateDailyLimit,
     isConnecting,
     isTesting,
+    isUpdatingLimit,
   } = useLinkedInAccounts();
 
   // Helper function to show toast
@@ -142,6 +147,47 @@ export default function AccountsPage() {
       await toggleAccountStatus(accountId, isActive);
     } catch (error) {
       showToast(`Error: ${error.message || 'Failed to update account status'}`, 'error');
+    }
+  };
+
+  // Configure Daily Limits handlers
+  const handleOpenLimitModal = (account) => {
+    setSelectedAccountForLimit(account);
+    // Clamp to max 30 (in case database has old value > 30)
+    setTempDailyLimit(Math.min(account.dailyLimit || 30, 30));
+    setShowLimitModal(true);
+  };
+
+  const handleSaveDailyLimit = async () => {
+    if (!selectedAccountForLimit) return;
+
+    try {
+      await updateDailyLimit(selectedAccountForLimit.id, tempDailyLimit);
+
+      showToast(`Daily limit updated to ${tempDailyLimit} for ${selectedAccountForLimit.email}`, 'success');
+      setShowLimitModal(false);
+      setSelectedAccountForLimit(null);
+    } catch (error) {
+      showToast(error.message || 'Failed to update daily limit', 'error');
+    }
+  };
+
+  const incrementLimit = () => {
+    if (tempDailyLimit < 30) {
+      setTempDailyLimit(prev => prev + 1);
+    }
+  };
+
+  const decrementLimit = () => {
+    if (tempDailyLimit > 1) {
+      setTempDailyLimit(prev => prev - 1);
+    }
+  };
+
+  const handleLimitInputChange = (e) => {
+    const value = parseInt(e.target.value);
+    if (!isNaN(value)) {
+      setTempDailyLimit(Math.max(1, Math.min(30, value)));
     }
   };
 
@@ -359,15 +405,18 @@ export default function AccountsPage() {
                       <div className="col-span-3">
                         <div className="space-y-1 text-sm">
                           <div className="flex items-center justify-between">
-                            <span className="text-base-content/60">Connection invites</span>
-                            <span className="font-medium">{account.connectionInvites}</span>
+                            <span className="text-base-content/60">Today&apos;s invites</span>
+                            <span className="font-medium">{account.dailyInvitesSent}/{account.dailyLimit}</span>
                           </div>
                           <div className="flex items-center justify-between">
                             <span className="text-base-content/60">Follow-up Messages</span>
                             <span className="font-medium">{account.followUpMessages}</span>
                           </div>
                         </div>
-                        <button className="btn btn-outline btn-xs mt-2 gap-1">
+                        <button 
+                          className="btn btn-outline btn-xs mt-2 gap-1"
+                          onClick={() => handleOpenLimitModal(account)}
+                        >
                           <Settings className="h-3 w-3" />
                           Configure Daily Limits
                         </button>
@@ -647,6 +696,166 @@ export default function AccountsPage() {
                   )}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Configure Daily Limits Modal */}
+      {showLimitModal && selectedAccountForLimit && (
+        <div className="modal modal-open">
+          <div className="modal-box max-w-md bg-base-100 border border-base-300">
+            {/* Header */}
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h3 className="font-bold text-lg">Configure Daily Limits</h3>
+                <p className="text-sm text-base-content/60 mt-1">
+                  {selectedAccountForLimit.email}
+                </p>
+              </div>
+              <button
+                className="btn btn-sm btn-circle btn-ghost"
+                onClick={() => setShowLimitModal(false)}
+                disabled={isUpdatingLimit}
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="space-y-6">
+              {/* Daily Invite Limit */}
+              <div>
+                <label className="label">
+                  <span className="label-text font-medium">Daily Connection Invites</span>
+                  <span className="label-text-alt text-xs text-base-content/60">
+                    Max: 30/day
+                  </span>
+                </label>
+                
+                {/* Increment/Decrement Controls */}
+                <div className="flex items-center gap-3">
+                  <button
+                    className="btn btn-circle btn-outline"
+                    onClick={decrementLimit}
+                    disabled={tempDailyLimit <= 1 || isUpdatingLimit}
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      className="h-5 w-5"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                    >
+                      <line x1="5" y1="12" x2="19" y2="12" />
+                    </svg>
+                  </button>
+
+                  <div className="flex-1">
+                    <input
+                      type="number"
+                      min="1"
+                      max="30"
+                      value={tempDailyLimit}
+                      onChange={handleLimitInputChange}
+                      disabled={isUpdatingLimit}
+                      className="input input-bordered w-full text-center text-2xl font-bold"
+                    />
+                  </div>
+
+                  <button
+                    className="btn btn-circle btn-outline"
+                    onClick={incrementLimit}
+                    disabled={tempDailyLimit >= 30 || isUpdatingLimit}
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      className="h-5 w-5"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                    >
+                      <line x1="12" y1="5" x2="12" y2="19" />
+                      <line x1="5" y1="12" x2="19" y2="12" />
+                    </svg>
+                  </button>
+                </div>
+
+                {/* Visual Progress Bar */}
+                <div className="mt-4">
+                  <div className="flex justify-between text-xs text-base-content/60 mb-2">
+                    <span>Conservative</span>
+                    <span>Moderate</span>
+                    <span>Maximum</span>
+                  </div>
+                  <progress
+                    className="progress progress-primary w-full"
+                    value={tempDailyLimit}
+                    max="30"
+                  />
+                  <p className="text-xs text-base-content/60 mt-2 text-center">
+                    {tempDailyLimit < 10 && "Conservative approach - safer for new accounts"}
+                    {tempDailyLimit >= 10 && tempDailyLimit < 20 && "Moderate pace - balanced approach"}
+                    {tempDailyLimit >= 20 && "Maximum allowed - use with caution"}
+                  </p>
+                </div>
+              </div>
+
+              {/* Info Box */}
+              <div className="alert alert-info">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  className="stroke-current shrink-0 w-5 h-5"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="2"
+                    d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                  />
+                </svg>
+                <span className="text-xs">
+                  LinkedIn recommends starting with lower limits for new accounts to avoid restrictions.
+                </span>
+              </div>
+
+              {/* Current Usage Stats */}
+              <div className="stats bg-base-200 w-full">
+                <div className="stat py-3 px-4">
+                  <div className="stat-title text-xs">Today&apos;s Invites</div>
+                  <div className="stat-value text-2xl">{selectedAccountForLimit.dailyInvitesSent || 0}</div>
+                  <div className="stat-desc text-xs">out of {tempDailyLimit} limit</div>
+                </div>
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div className="modal-action">
+              <button
+                className="btn btn-ghost"
+                onClick={() => setShowLimitModal(false)}
+                disabled={isUpdatingLimit}
+              >
+                Cancel
+              </button>
+              <button
+                className="btn btn-primary"
+                onClick={handleSaveDailyLimit}
+                disabled={isUpdatingLimit}
+              >
+                {isUpdatingLimit ? (
+                  <>
+                    <span className="loading loading-spinner loading-sm" />
+                    Saving...
+                  </>
+                ) : (
+                  'Save Changes'
+                )}
+              </button>
             </div>
           </div>
         </div>

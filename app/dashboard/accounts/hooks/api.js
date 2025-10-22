@@ -111,4 +111,20 @@ export const linkedinAccountApi = {
 
     return result;
   },
+
+  // Update account daily limit
+  updateAccountDailyLimit: async (accountId, dailyLimit) => {
+    const response = await fetch('/api/linkedin/accounts/update-limit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ accountId, dailyLimit })
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to update daily limit');
+    }
+
+    return response.json();
+  },
 };

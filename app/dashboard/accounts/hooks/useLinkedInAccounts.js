@@ -121,6 +121,17 @@ export function useLinkedInAccounts() {
     },
   });
 
+  // Update daily limit mutation
+  const updateDailyLimitMutation = useMutation({
+    mutationFn: ({ accountId, dailyLimit }) => linkedinAccountApi.updateAccountDailyLimit(accountId, dailyLimit),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: linkedinAccountKeys.lists() });
+    },
+    onError: (error) => {
+      console.error("Failed to update daily limit:", error);
+    },
+  });
+
   // Connect account function
   const connectAccount = async (email, password) => {
     return connectAccountMutation.mutateAsync({ email, password });
@@ -144,6 +155,11 @@ export function useLinkedInAccounts() {
   // Test account session function
   const testAccountSession = async (sessionId) => {
     return testAccountSessionMutation.mutateAsync(sessionId);
+  };
+
+  // Update daily limit function
+  const updateDailyLimit = async (accountId, dailyLimit) => {
+    return updateDailyLimitMutation.mutateAsync({ accountId, dailyLimit });
   };
 
   // Refresh accounts
@@ -175,6 +191,7 @@ export function useLinkedInAccounts() {
     deleteAccount,
     updateAccountSettings,
     testAccountSession,
+    updateDailyLimit,
     refreshAccounts,
     // Additional React Query specific properties
     isConnecting: connectAccountMutation.isPending,
@@ -182,5 +199,6 @@ export function useLinkedInAccounts() {
     isDeleting: deleteAccountMutation.isPending,
     isUpdating: updateAccountSettingsMutation.isPending,
     isTesting: testAccountSessionMutation.isPending,
+    isUpdatingLimit: updateDailyLimitMutation.isPending,
   };
 }

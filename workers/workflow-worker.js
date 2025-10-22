@@ -224,24 +224,20 @@ async function runJob() {
       .where(eq(workflowJobs.id, jobId));
     
     // Process Each Batch Sequentially
+    if (isResume) {
+      console.log(`🔄 Resuming workflow | Previously processed: ${job.processedLeads} | Eligible now: ${leadsToProcess.length}`);
+    }
     console.log(`🔄 Starting batch processing...`);
     
     let totalSent = 0;
     let totalFailed = 0;
     let totalAlreadyConnected = 0;
     let totalAlreadyPending = 0;
-    let currentLeadIndex = isResume ? job.processedLeads : 0;
+    let currentLeadIndex = 0; // Always start from 0 with filtered eligible leads
     
     for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
       const batch = batches[batchIndex];
       let batchContext = null;
-      
-      // Skip batches that were already processed (for resume functionality)
-      const batchStartIndex = batchIndex * BATCH_SIZE;
-      if (isResume && batchStartIndex < job.processedLeads) {
-        console.log(`⏭️  Skipping batch ${batchIndex + 1} (already processed)`);
-        continue;
-      }
       
       console.log(`\n📦 Batch ${batchIndex + 1}/${batches.length} | ${batch.length} leads`);
       
@@ -322,6 +318,11 @@ async function runJob() {
           
           console.log(`  ✅ Sent: ${batchResults.sent} | Failed: ${batchResults.failed}`);
           
+          // Increment daily counter for successfully sent invites
+          if (batchResults.sent > 0) {
+            await incrementDailyCounter(job.accountId, batchResults.sent);
+          }
+          
         } catch (processError) {
           // Handle workflow control signals (pause/cancel via DB fallback)
           if (processError.message === 'WORKFLOW_PAUSED' || processError.message === 'WORKFLOW_CANCELLED') {
@@ -343,11 +344,6 @@ async function runJob() {
           
           // Other processing errors - re-throw to batch error handler
           throw processError;
-        }
-        
-        // Increment daily counter for successfully sent invites
-        if (batchResults.sent > 0) {
-          await incrementDailyCounter(job.accountId, batchResults.sent);
         }
         
       } catch (batchError) {

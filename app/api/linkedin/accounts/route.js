@@ -15,8 +15,10 @@ export const GET = withAuth(async (request, { user }) => {
       name: session.userName || session.email, // Use actual name, fallback to email
       profileImageUrl: session.profileImageUrl || null,
       isActive: session.isActive || false,
-      connectionInvites: session.connectionInvites || 0,
+      dailyInvitesSent: session.dailyInvitesSent || 0, // Today's invites sent (for rate limiting)
+      connectionInvites: session.connectionInvites || 0, // Cumulative total (legacy stats)
       followUpMessages: session.followUpMessages || 0,
+      dailyLimit: session.dailyLimit || 30,
       addedDate: new Date(session.createdAt).toLocaleDateString(),
       tags: session.tags || [],
       salesNavActive: session.salesNavActive || true,

@@ -102,7 +102,7 @@ export const linkedinAccounts = pgTable('linkedin_accounts', {
   salesNavActive: boolean('sales_nav_active').default(true),
   // Daily rate limiting
   dailyInvitesSent: integer('daily_invites_sent').default(0).notNull(),
-  dailyLimit: integer('daily_limit').default(100).notNull(),
+  dailyLimit: integer('daily_limit').default(30).notNull(),
   lastDailyReset: timestamp('last_daily_reset').defaultNow().notNull(),
   // Connection check rate limiting
   dailyConnectionChecks: integer('daily_connection_checks').default(0).notNull(),
