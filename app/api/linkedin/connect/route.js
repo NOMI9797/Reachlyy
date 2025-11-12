@@ -67,9 +67,19 @@ async function connectLinkedInViaBrowser(sessionId, email, password) {
   console.log('🚀 Starting automated LinkedIn connection...');
   
   // Launch browser context (no persistent storage needed since we save to database)
+  // Configure for serverless environments (Vercel)
   const browser = await chromium.launch({
-    headless: true, // Keep visible for debugging
+    headless: true,
     slowMo: 1000,
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-accelerated-2d-canvas',
+      '--no-first-run',
+      '--no-zygote',
+      '--disable-gpu'
+    ]
   });
   
   const context = await browser.newContext({

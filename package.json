@@ -6,6 +6,7 @@
     "dev": "next dev -p 8085",
     "build": "next build",
     "postbuild": "next-sitemap",
+    "postinstall": "npx playwright install chromium --with-deps || true",
     "start": "next start",
     "lint": "next lint",
     "db:generate": "drizzle-kit generate",

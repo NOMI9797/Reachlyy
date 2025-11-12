@@ -19,12 +19,21 @@ export async function testLinkedInSession(sessionData, keepOpen = false) {
     // Import Playwright dynamically to avoid issues in serverless environments
     const { chromium } = await import('playwright');
     
-    // Launch browser context
+    // Launch browser context (configured for serverless environments)
     const context = await chromium.launchPersistentContext(
       `/tmp/linkedin-test-${sessionData.sessionId}`,
       {
         headless: true,
         viewport: { width: 1280, height: 720 },
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-accelerated-2d-canvas',
+          '--no-first-run',
+          '--no-zygote',
+          '--disable-gpu'
+        ]
       }
     );
 
