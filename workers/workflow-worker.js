@@ -14,6 +14,10 @@ import { checkDailyLimit, incrementDailyCounter } from '../libs/rate-limit-manag
 import { db } from '../libs/db';
 import { workflowJobs, linkedinAccounts } from '../libs/schema';
 import { eq } from 'drizzle-orm';
+import { createClient } from 'redis';
+
+// Global Redis subscriber for event-driven job control
+let redisSubscriber = null;
 
 const jobId = process.argv[2];
 
@@ -25,7 +29,96 @@ if (!jobId) {
 
 console.log(`🚀 Worker Started | Job: ${jobId.substring(0, 8)}... | PID: ${process.pid}`);
 
+/**
+ * Setup Redis Pub/Sub listener for instant job control
+ * Subscribes to job:{jobId}:control channel for pause/cancel signals
+ */
+async function setupControlListener(jobId) {
+  try {
+    // Create dedicated subscriber client
+    redisSubscriber = createClient({
+      url: process.env.REDIS_URL || 'redis://localhost:6379'
+    });
+
+    // Handle connection errors
+    redisSubscriber.on('error', (err) => {
+      console.error('⚠️  Redis Subscriber Error:', err.message);
+      // Don't crash - we have DB fallback
+    });
+
+    await redisSubscriber.connect();
+    
+    const channel = `job:${jobId}:control`;
+    
+    // Subscribe to control channel
+    await redisSubscriber.subscribe(channel, async (message) => {
+      try {
+        const data = JSON.parse(message);
+        const timestamp = new Date().toISOString();
+        const latency = Date.now() - new Date(data.timestamp).getTime();
+        
+        console.log(`\n📡 [${timestamp}] Redis Signal Received`);
+        console.log(`   Action: ${data.action.toUpperCase()}`);
+        console.log(`   Job: ${jobId.substring(0, 8)}...`);
+        console.log(`   Source: ${data.userId || 'unknown'}`);
+        console.log(`   Latency: ~${latency}ms`);
+        
+        if (data.action === 'cancel' || data.action === 'pause') {
+          const actionName = data.action.toUpperCase();
+          console.log(`🛑 [CONTROL] ${actionName} signal received - EXITING IMMEDIATELY`);
+          console.log(`   Event-driven exit via Redis Pub/Sub`);
+          
+          // Cleanup Redis connection
+          await cleanupRedisSubscriber();
+          
+          // Exit immediately - truly event-driven!
+          console.log(`👋 Exit: 0 (${data.action})`);
+          process.exit(0);
+        }
+      } catch (parseError) {
+        console.error('❌ Failed to parse Redis message:', parseError.message);
+      }
+    });
+    
+    console.log(`📡 Subscribed to control channel: ${channel}`);
+    return true;
+    
+  } catch (error) {
+    console.error('⚠️  Redis subscription failed:', error.message);
+    console.log('⚠️  Falling back to DB polling for control signals');
+    return false;
+  }
+}
+
+/**
+ * Cleanup Redis subscriber connection
+ */
+async function cleanupRedisSubscriber() {
+  if (redisSubscriber) {
+    try {
+      await redisSubscriber.quit();
+      console.log('🔌 Redis subscriber disconnected');
+    } catch (error) {
+      console.error('⚠️  Error disconnecting Redis subscriber:', error.message);
+    }
+  }
+}
+
+// Handle process termination signals
+process.on('SIGTERM', async () => {
+  console.log('\n🛑 SIGTERM received - shutting down gracefully...');
+  await cleanupRedisSubscriber();
+  process.exit(0);
+});
+
+process.on('SIGINT', async () => {
+  console.log('\n🛑 SIGINT received - shutting down gracefully...');
+  await cleanupRedisSubscriber();
+  process.exit(0);
+});
+
 async function runJob() {
+  let useRedisControl = false;
   try {
     // Fetch Job from Database
     const job = await db.query.workflowJobs.findFirst({
@@ -42,6 +135,16 @@ async function runJob() {
     await db.update(workflowJobs)
       .set({ status: 'processing', startedAt: new Date() })
       .where(eq(workflowJobs.id, jobId));
+    
+    // Setup Redis control listener for instant pause/cancel
+    console.log('📡 Setting up real-time control listener...');
+    useRedisControl = await setupControlListener(jobId);
+    
+    if (useRedisControl) {
+      console.log('✅ Real-time control: ENABLED (Redis Pub/Sub)');
+    } else {
+      console.log('⚠️  Real-time control: DISABLED (using DB fallback)');
+    }
     
     // Get LinkedIn Account Data
     const accountData = await db.query.linkedinAccounts.findFirst({
@@ -109,19 +212,28 @@ async function runJob() {
     
     console.log(`📦 Batches: ${batches.length} × ${BATCH_SIZE} leads`);
     
+    // Check if this is a resume (processedLeads > 0)
+    const isResume = job.processedLeads > 0;
+    if (isResume) {
+      console.log(`🔄 Resuming from lead ${job.processedLeads + 1}/${leadsToProcess.length}`);
+    }
+    
     // Update total leads in job
     await db.update(workflowJobs)
       .set({ totalLeads: leadsToProcess.length })
       .where(eq(workflowJobs.id, jobId));
     
     // Process Each Batch Sequentially
+    if (isResume) {
+      console.log(`🔄 Resuming workflow | Previously processed: ${job.processedLeads} | Eligible now: ${leadsToProcess.length}`);
+    }
     console.log(`🔄 Starting batch processing...`);
     
     let totalSent = 0;
     let totalFailed = 0;
     let totalAlreadyConnected = 0;
     let totalAlreadyPending = 0;
-    let currentLeadIndex = 0;
+    let currentLeadIndex = 0; // Always start from 0 with filtered eligible leads
     
     for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
       const batch = batches[batchIndex];
@@ -150,41 +262,92 @@ async function runJob() {
             const progress = Math.round((currentLeadIndex / leadsToProcess.length) * 100);
             
             try {
+              // Update progress
               await db.update(workflowJobs)
-                .set({ 
+                .set({
                   processedLeads: currentLeadIndex,
-                  progress 
+                  progress
                 })
                 .where(eq(workflowJobs.id, jobId));
               
               console.log(`  📊 Progress: ${currentLeadIndex}/${leadsToProcess.length} (${progress}%)`);
+              
+              // 🔥 Increment daily counter immediately for successfully sent invites
+              if (progressData.status === 'sent') {
+                await incrementDailyCounter(job.accountId, 1);
+                console.log(`  📊 Daily counter incremented (+1)`);
+              }
+              
+              // 🔥 FALLBACK: Check for pause/cancel after every lead if Redis is unavailable
+              if (!useRedisControl) {
+                const currentJob = await db.query.workflowJobs.findFirst({
+                  where: eq(workflowJobs.id, jobId),
+                  columns: { status: true }  // Only fetch status column (optimization)
+                });
+                
+                if (currentJob && (currentJob.status === 'paused' || currentJob.status === 'cancelled')) {
+                  console.log(`🛑 [FALLBACK] Job ${currentJob.status} detected during lead processing`);
+                  console.log(`   Exiting after lead ${currentLeadIndex}/${leadsToProcess.length}`);
+                  
+                  // Throw error to break out of invite processing loop
+                  throw new Error(`WORKFLOW_${currentJob.status.toUpperCase()}`);
+                }
+              }
+              
             } catch (dbError) {
+              // Re-throw workflow control errors (pause/cancel)
+              if (dbError.message && dbError.message.startsWith('WORKFLOW_')) {
+                throw dbError;
+              }
+              // Log other DB errors but don't stop workflow
               console.error(`  ❌ DB update failed:`, dbError.message);
             }
           }
         };
         
         // Process invites (reuses existing automation logic)
-        const batchResults = await processInvitesDirectly(
-          batchContext,
-          batchPage,
-          batch,
-          job.customMessage || "Hi! I'd like to connect with you.",
-          job.campaignId,
-          progressCallback
-        );
-        
-        // Aggregate results
-        totalSent += batchResults.sent;
-        totalFailed += batchResults.failed;
-        totalAlreadyConnected += batchResults.alreadyConnected;
-        totalAlreadyPending += batchResults.alreadyPending;
-        
-        console.log(`  ✅ Sent: ${batchResults.sent} | Failed: ${batchResults.failed}`);
-        
-        // Increment daily counter for successfully sent invites
-        if (batchResults.sent > 0) {
-          await incrementDailyCounter(job.accountId, batchResults.sent);
+        try {
+          const batchResults = await processInvitesDirectly(
+            batchContext,
+            batchPage,
+            batch,
+            job.customMessage || "Hi! I'd like to connect with you.",
+            job.campaignId,
+            progressCallback
+          );
+          
+          // Aggregate results
+          totalSent += batchResults.sent;
+          totalFailed += batchResults.failed;
+          totalAlreadyConnected += batchResults.alreadyConnected;
+          totalAlreadyPending += batchResults.alreadyPending;
+          
+          console.log(`  ✅ Sent: ${batchResults.sent} | Failed: ${batchResults.failed}`);
+          
+          // Note: Daily counter is now incremented per-lead in progressCallback (above)
+          // This ensures accurate tracking even if batch is interrupted by pause/cancel
+          
+        } catch (processError) {
+          // Handle workflow control signals (pause/cancel via DB fallback)
+          if (processError.message === 'WORKFLOW_PAUSED' || processError.message === 'WORKFLOW_CANCELLED') {
+            const action = processError.message.replace('WORKFLOW_', '').toLowerCase();
+            console.log(`🛑 Workflow ${action} - cleaning up and exiting`);
+            
+            // Close browser gracefully
+            if (batchContext) {
+              console.log('🔒 Closing browser before exit...');
+              await cleanupBrowserSession(batchContext);
+            }
+            
+            // Cleanup Redis
+            await cleanupRedisSubscriber();
+            
+            console.log(`👋 Exit: 0 (${action})`);
+            process.exit(0);
+          }
+          
+          // Other processing errors - re-throw to batch error handler
+          throw processError;
         }
         
       } catch (batchError) {
@@ -256,6 +419,10 @@ async function runJob() {
     
     console.log(`👋 Exit: 1\n`);
     process.exit(1);
+    
+  } finally {
+    // Always cleanup Redis subscriber
+    await cleanupRedisSubscriber();
   }
 }
 

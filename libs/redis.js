@@ -282,4 +282,5 @@ export class RedisStreamManager {
   }
 }
 
+// Export default and named exports
 export default getRedisClient;

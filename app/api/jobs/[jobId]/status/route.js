@@ -34,6 +34,44 @@ export const GET = withAuth(async (request, { params, user }) => {
     
     console.log(`✅ Job found: ${job.status} (${job.progress}%)`);
     
+    // ============================================================
+    // Timeout Detection: Check if job has been processing too long
+    // ============================================================
+    const TIMEOUT_MS = 2 * 60 * 60 * 1000; // 2 hours
+    
+    if (job.status === 'processing' && job.startedAt) {
+      const jobAge = Date.now() - new Date(job.startedAt).getTime();
+      
+      if (jobAge > TIMEOUT_MS) {
+        console.log(`⏱️  Job ${jobId} has been processing for ${Math.round(jobAge / 60000)} minutes (timeout: ${TIMEOUT_MS / 60000} min)`);
+        console.log(`⚠️  Marking job as timeout...`);
+        
+        // Update job status to timeout
+        await db.update(workflowJobs)
+          .set({
+            status: 'timeout',
+            errorMessage: `Job exceeded ${TIMEOUT_MS / 60000} minute timeout. Worker may have crashed.`,
+            completedAt: new Date()
+          })
+          .where(eq(workflowJobs.id, jobId));
+        
+        // Return updated status
+        return NextResponse.json({
+          jobId: job.id,
+          campaignId: job.campaignId,
+          status: 'timeout',
+          progress: job.progress || 0,
+          totalLeads: job.totalLeads,
+          processedLeads: job.processedLeads || 0,
+          results: job.results,
+          errorMessage: `Job exceeded ${TIMEOUT_MS / 60000} minute timeout. Worker may have crashed.`,
+          createdAt: job.createdAt,
+          startedAt: job.startedAt,
+          completedAt: new Date()
+        });
+      }
+    }
+    
     // Return job status
     return NextResponse.json({
       jobId: job.id,

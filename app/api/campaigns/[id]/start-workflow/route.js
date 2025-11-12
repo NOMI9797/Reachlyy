@@ -11,7 +11,7 @@ import { NextResponse } from "next/server";
 import { withAuth } from "@/libs/auth-middleware";
 import { db } from "@/libs/db";
 import { workflowJobs, campaigns, linkedinAccounts } from "@/libs/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, inArray } from "drizzle-orm";
 import { spawn } from "child_process";
 import path from "path";
 import LinkedInSessionManager from "@/libs/linkedin-session";
@@ -62,9 +62,51 @@ export const POST = withAuth(async (request, { params, user }) => {
     console.log(`✅ Active account: ${activeAccount.email} (${accountId})`);
     
     // ============================================================
-    // STEP 3: Create Workflow Job
+    // STEP 3: Check for Existing Running Job (One Job Per User)
     // ============================================================
-    console.log(`💾 STEP 3: Creating workflow job in database...`);
+    console.log(`🔍 STEP 3: Checking for existing running job (any campaign)...`);
+    
+    // Check if user has ANY running job (not just for this campaign)
+    const existingJob = await db.query.workflowJobs.findFirst({
+      where: and(
+        eq(workflowJobs.userId, user.id),
+        inArray(workflowJobs.status, ['queued', 'processing'])
+      )
+    });
+    
+    if (existingJob) {
+      console.log(`⚠️  User already has a running job: ${existingJob.id}`);
+      console.log(`⚠️  Job campaign: ${existingJob.campaignId}, status: ${existingJob.status}`);
+      
+      // Get campaign name for better user message
+      const runningCampaign = await db.query.campaigns.findFirst({
+        where: eq(campaigns.id, existingJob.campaignId)
+      });
+      
+      const isSameCampaign = existingJob.campaignId === campaignId;
+      
+      return NextResponse.json({
+        error: 'WORKFLOW_ALREADY_RUNNING',
+        message: isSameCampaign 
+          ? 'A workflow is already running for this campaign'
+          : `Another workflow is already running for campaign "${runningCampaign?.name || 'Unknown'}". Please wait for it to complete.`,
+        jobId: existingJob.id,
+        campaignId: existingJob.campaignId,
+        campaignName: runningCampaign?.name,
+        status: existingJob.status,
+        progress: existingJob.progress || 0,
+        processedLeads: existingJob.processedLeads || 0,
+        totalLeads: existingJob.totalLeads || 0,
+        isSameCampaign
+      }, { status: 409 });
+    }
+    
+    console.log(`✅ No existing job found, creating new job...`);
+    
+    // ============================================================
+    // STEP 4: Create Workflow Job
+    // ============================================================
+    console.log(`💾 STEP 4: Creating workflow job in database...`);
     
     const [job] = await db.insert(workflowJobs).values({
       campaignId,

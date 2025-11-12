@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Minus, Maximize2, Save, Target, Undo2, Trash2, Play, AlertCircle } from "lucide-react";
+import { Plus, Minus, Maximize2, Save, Target, Undo2, Trash2, Play, Pause, X, AlertCircle } from "lucide-react";
 import ReactFlow, { Background, Controls, MiniMap, addEdge, useEdgesState, useNodesState, MarkerType, BaseEdge, getBezierPath, Handle, Position, EdgeLabelRenderer } from "reactflow";
 import "reactflow/dist/style.css";
 
@@ -115,6 +115,7 @@ export default function SendInviteCanvas({ campaignName, campaignId }) {
   
   // Background mode state
   const [currentJobId, setCurrentJobId] = useState(null);
+  const [status, setStatus] = useState(null);
   const pollIntervalRef = useRef(null);
 
   const onInit = useCallback((instance) => {
@@ -146,14 +147,11 @@ export default function SendInviteCanvas({ campaignName, campaignId }) {
     // Clear any old job data before starting new workflow
     localStorage.removeItem('currentJobId');
     localStorage.removeItem('currentCampaignId');
-    console.log('🧹 Cleared old job data from localStorage');
 
     setIsRunning(true);
     setActivationStatus(null);
     setProgress({ current: 0, total: 0 });
     setIsProcessing(true);
-
-    console.log(`🚀 Starting BACKGROUND workflow for campaign: ${campaignId}`);
 
     try {
       // Start workflow (returns immediately)
@@ -167,6 +165,46 @@ export default function SendInviteCanvas({ campaignName, campaignId }) {
 
       if (!response.ok) {
         const errorData = await response.json();
+        
+        // Handle existing workflow case (409 Conflict)
+        if (response.status === 409 && errorData.jobId) {
+          console.log(`🔄 Found existing running job: ${errorData.jobId}`);
+          
+          // Check if it's for the same campaign or a different one
+          if (errorData.isSameCampaign) {
+            // Same campaign - resume polling
+            setCurrentJobId(errorData.jobId);
+            localStorage.setItem('currentJobId', errorData.jobId);
+            localStorage.setItem('currentCampaignId', campaignId);
+            
+            setProgress({ 
+              current: errorData.processedLeads || 0, 
+              total: errorData.totalLeads || 0 
+            });
+            
+            setActivationStatus({ 
+              type: 'info', 
+              message: '🔄 Workflow already running',
+              details: `Resuming existing workflow (${errorData.progress || 0}% complete). Progress: ${errorData.processedLeads || 0}/${errorData.totalLeads || 0}`
+            });
+            
+            // Start polling the existing job
+            startPolling(errorData.jobId);
+            return;
+          } else {
+            // Different campaign - show error and don't proceed
+            setActivationStatus({ 
+              type: 'warning', 
+              message: '⚠️ Another workflow is running',
+              details: `Workflow for campaign "${errorData.campaignName || 'Unknown'}" is currently running (${errorData.progress || 0}% complete). Please wait for it to finish before starting a new one.`
+            });
+            
+            setIsRunning(false);
+            setIsProcessing(false);
+            return;
+          }
+        }
+        
         throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
       }
 
@@ -220,6 +258,9 @@ export default function SendInviteCanvas({ campaignName, campaignId }) {
         
         console.log(`📊 Poll result: ${status.status} - ${status.processedLeads}/${status.totalLeads}`);
         
+        // Update status state
+        setStatus(status);
+        
         // Update progress
         setProgress({ 
           current: status.processedLeads || 0, 
@@ -253,32 +294,207 @@ export default function SendInviteCanvas({ campaignName, campaignId }) {
             console.log(`🎉 Workflow completed!`);
           }
           
+          console.log(`✅ Polling stopped - Job completed`);
+          
           // Clear localStorage
           localStorage.removeItem('currentJobId');
           localStorage.removeItem('currentCampaignId');
           
-        } else if (status.status === 'failed') {
+        } else if (status.status === 'paused') {
+          // STOP POLLING - Job is idle
           clearInterval(pollIntervalRef.current);
           pollIntervalRef.current = null;
           setIsRunning(false);
           setIsProcessing(false);
           
-          setActivationStatus({ 
-            type: 'error', 
-            message: '❌ Workflow failed', 
-            details: status.errorMessage 
+          setActivationStatus({
+            type: 'info',
+            message: '⏸️ Workflow paused',
+            details: 'Click Resume to continue where you left off.'
           });
+          
+          console.log(`⏸️ Polling stopped - Job paused (idle state)`);
+          
+        } else if (status.status === 'cancelled') {
+          clearInterval(pollIntervalRef.current);
+          pollIntervalRef.current = null;
+          setIsRunning(false);
+          setIsProcessing(false);
+          
+          setActivationStatus({
+            type: 'warning',
+            message: '🛑 Workflow cancelled',
+            details: 'Workflow was cancelled by user.'
+          });
+          
+          // Reset all state after cancellation
+          setCurrentJobId(null);
+          setProgress({ current: 0, total: 0 });
+          
+          console.log(`🛑 Polling stopped - Job cancelled`);
           
           // Clear localStorage
           localStorage.removeItem('currentJobId');
           localStorage.removeItem('currentCampaignId');
           
-          console.error(`❌ Workflow failed: ${status.errorMessage}`);
+          console.log(`🛑 Workflow cancelled`);
+          
+        } else if (status.status === 'failed' || status.status === 'timeout') {
+          clearInterval(pollIntervalRef.current);
+          pollIntervalRef.current = null;
+          setIsRunning(false);
+          setIsProcessing(false);
+          
+          const isTimeout = status.status === 'timeout';
+          
+          setActivationStatus({ 
+            type: 'error', 
+            message: isTimeout ? '⏱️ Workflow timed out' : '❌ Workflow failed', 
+            details: status.errorMessage || (isTimeout ? 'The workflow took too long and may have crashed. Please try again.' : 'An error occurred during workflow execution.')
+          });
+          
+          console.log(`❌ Polling stopped - Job ${isTimeout ? 'timed out' : 'failed'}`);
+          
+          // Clear localStorage
+          localStorage.removeItem('currentJobId');
+          localStorage.removeItem('currentCampaignId');
+          
+          console.error(`❌ Workflow ${status.status}: ${status.errorMessage}`);
         }
       } catch (pollError) {
         console.error('❌ Poll error:', pollError);
       }
     }, 3000); // Poll every 3 seconds
+  };
+
+  // Pause workflow
+  const handlePauseWorkflow = async () => {
+    if (!currentJobId) return;
+    
+    try {
+      const response = await fetch(`/api/jobs/${currentJobId}/pause`, {
+        method: 'POST'
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to pause');
+      }
+      
+      setActivationStatus({
+        type: 'info',
+        message: '⏸️ Workflow pausing...',
+        details: 'The workflow will pause after the current batch completes.'
+      });
+    } catch (error) {
+      console.error('❌ Pause error:', error);
+      setActivationStatus({
+        type: 'error',
+        message: 'Failed to pause workflow',
+        details: error.message
+      });
+    }
+  };
+
+  // Resume workflow
+  const handleResumeWorkflow = async () => {
+    if (!currentJobId) return;
+    
+    try {
+      const response = await fetch(`/api/jobs/${currentJobId}/resume`, {
+        method: 'POST'
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        
+        // Handle concurrent workflow case
+        if (response.status === 409) {
+          setActivationStatus({
+            type: 'warning',
+            message: '⚠️ Another workflow is running',
+            details: errorData.message
+          });
+          return;
+        }
+        
+        throw new Error(errorData.error || 'Failed to resume');
+      }
+      
+      setActivationStatus({
+        type: 'info',
+        message: '▶️ Workflow resumed',
+        details: 'Continuing from where you left off...'
+      });
+      
+      // Set processing state
+      setIsRunning(true);
+      setIsProcessing(true);
+      
+      // Restart polling for resumed job
+      console.log(`🔄 Restarting polling for resumed job: ${currentJobId.substring(0, 8)}...`);
+      startPolling(currentJobId);
+      
+    } catch (error) {
+      console.error('❌ Resume error:', error);
+      setActivationStatus({
+        type: 'error',
+        message: 'Failed to resume workflow',
+        details: error.message
+      });
+    }
+  };
+
+  // Cancel workflow
+  const handleCancelWorkflow = async () => {
+    if (!currentJobId) return;
+    
+    const confirmCancel = window.confirm(
+      'Are you sure? This will permanently cancel the workflow and you cannot resume it.'
+    );
+    
+    if (!confirmCancel) return;
+    
+    try {
+      const response = await fetch(`/api/jobs/${currentJobId}/cancel`, {
+        method: 'POST'
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to cancel');
+      }
+      
+      setActivationStatus({
+        type: 'warning',
+        message: '🛑 Workflow cancelled',
+        details: 'You can start a new workflow.'
+      });
+      
+      // Reset all state
+      setIsRunning(false);
+      setIsProcessing(false);
+      setCurrentJobId(null);
+      setProgress({ current: 0, total: 0 });
+      setStatus(null);
+      
+      // Clear localStorage
+      localStorage.removeItem('currentJobId');
+      localStorage.removeItem('currentCampaignId');
+      
+      // Stop polling
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
+    } catch (error) {
+      console.error('❌ Cancel error:', error);
+      setActivationStatus({
+        type: 'error',
+        message: 'Failed to cancel workflow',
+        details: error.message
+      });
+    }
   };
 
   // Run Workflow function - uses SSE for real-time progress
@@ -492,55 +708,67 @@ export default function SendInviteCanvas({ campaignName, campaignId }) {
     return () => window.removeEventListener('deleteNode', handleDeleteNode);
   }, [deleteNode]);
 
-  // Resume polling on mount if there's an ongoing job
+  // Check for active jobs on mount (handles navigation back to campaign with paused job)
   useEffect(() => {
-    const savedJobId = localStorage.getItem('currentJobId');
-    const savedCampaignId = localStorage.getItem('currentCampaignId');
-    
-    if (savedJobId && savedCampaignId === campaignId) {
-      console.log(`🔄 Found saved job: ${savedJobId}, resuming polling...`);
+    const checkForActiveJob = async () => {
+      if (!campaignId) return;
       
-      // Fetch current job status
-      fetch(`/api/jobs/${savedJobId}/status`)
-        .then(res => res.json())
-        .then(status => {
-          if (status.status === 'processing' || status.status === 'queued') {
-            setCurrentJobId(savedJobId);
-            setIsRunning(true);
-            setIsProcessing(true);
-            setProgress({ current: status.processedLeads || 0, total: status.totalLeads || 0 });
-            setActivationStatus({ 
-              type: 'info', 
-              message: '🔄 Resuming workflow progress...',
-              details: 'Your workflow is still running in the background.'
+      try {
+        console.log(`🔍 Checking for active jobs for campaign: ${campaignId.substring(0, 8)}...`);
+        
+        // Check database for any active job for this campaign
+        const response = await fetch(`/api/campaigns/${campaignId}/active-job`);
+        
+        if (!response.ok) {
+          console.log('No active job found or error checking');
+          return;
+        }
+        
+        const { job } = await response.json();
+        
+        if (job && ['processing', 'queued', 'paused'].includes(job.status)) {
+          console.log(`✅ Found active job: ${job.id.substring(0, 8)}... | Status: ${job.status}`);
+          
+          // Restore job state
+          setCurrentJobId(job.id);
+          setStatus({ ...job, status: job.status });
+          setIsRunning(job.status !== 'paused');
+          setIsProcessing(job.status === 'processing');
+          setProgress({ 
+            current: job.processedLeads || 0, 
+            total: job.totalLeads || 0 
+          });
+          
+          // Save to localStorage
+          localStorage.setItem('currentJobId', job.id);
+          localStorage.setItem('currentCampaignId', campaignId);
+          
+          // Show appropriate status message
+          if (job.status === 'paused') {
+            setActivationStatus({
+              type: 'info',
+              message: '⏸️ Workflow paused',
+              details: 'Click Resume to continue where you left off.'
             });
-            startPolling(savedJobId);
-          } else if (status.status === 'completed') {
-            setActivationStatus({ 
-              type: 'success', 
-              message: '✅ Workflow completed while you were away!',
-              details: status.results ? 
-                `Sent: ${status.results.sent}, Already Connected: ${status.results.alreadyConnected}, Already Pending: ${status.results.alreadyPending}, Failed: ${status.results.failed}` : 
-                'Workflow completed successfully'
+          } else {
+            setActivationStatus({
+              type: 'info',
+              message: '🔄 Workflow in progress',
+              details: `Processing ${job.processedLeads || 0}/${job.totalLeads || 0} leads`
             });
-            localStorage.removeItem('currentJobId');
-            localStorage.removeItem('currentCampaignId');
-          } else if (status.status === 'failed') {
-            setActivationStatus({ 
-              type: 'error', 
-              message: '❌ Workflow failed',
-              details: status.errorMessage
-            });
-            localStorage.removeItem('currentJobId');
-            localStorage.removeItem('currentCampaignId');
           }
-        })
-        .catch(err => {
-          console.error('❌ Failed to resume job:', err);
-          localStorage.removeItem('currentJobId');
-          localStorage.removeItem('currentCampaignId');
-        });
-    }
+          
+          // Start polling
+          startPolling(job.id);
+        } else {
+          console.log('No active jobs found for this campaign');
+        }
+      } catch (error) {
+        console.error('❌ Error checking for active job:', error);
+      }
+    };
+    
+    checkForActiveJob();
     
     // Cleanup on unmount
     return () => {
@@ -703,43 +931,64 @@ export default function SendInviteCanvas({ campaignName, campaignId }) {
           </div>
           <div className="flex items-center gap-3">
             <button className="btn btn-ghost btn-sm text-slate-400 hover:text-slate-200" onClick={() => router.back()}>
-              Cancel
+              Back
             </button>
+            
+            {/* Run Background Button */}
             <button 
-              className={`btn btn-secondary btn-sm px-4 font-medium shadow-lg hover:shadow-xl transition-all duration-200 ${isRunning ? 'loading' : ''}`}
-              onClick={handleRunWorkflow}
-              disabled={isRunning || !campaignId}
-              title="Run with real-time updates (browser must stay open)"
-            >
-              {isRunning ? (
-                <>
-                  <span className="loading loading-spinner loading-xs mr-2"></span>
-                  Running...
-                </>
-              ) : (
-                <>
-                  <Play className="h-4 w-4 mr-2" />
-                  Run (SSE)
-                </>
-              )}
-            </button>
-            <button 
-              className={`btn btn-primary btn-sm px-4 font-medium shadow-lg hover:shadow-xl transition-all duration-200 ${isRunning ? 'loading' : ''}`}
+              className="btn btn-primary btn-sm px-4 font-medium shadow-lg hover:shadow-xl transition-all duration-200"
               onClick={handleRunWorkflowBackground}
-              disabled={isRunning || !campaignId}
-              title="Run in background (survives browser close)"
+              disabled={(currentJobId && ['processing', 'paused'].includes(status?.status)) || isRunning || !campaignId}
+              title={
+                !campaignId ? 'No campaign selected' :
+                (currentJobId && ['processing', 'paused'].includes(status?.status))
+                  ? 'A workflow is already running' 
+                  : 'Run in background (survives browser close)'
+              }
             >
-              {isRunning ? (
+              <Play className="h-4 w-4 mr-2" />
+              Run Background
+            </button>
+            
+            {/* Dynamic Stop/Resume Button */}
+            <button 
+              className={`btn btn-sm px-4 font-medium shadow-lg transition-all duration-200 ${
+                status?.status === 'paused' ? 'btn-success' : 'btn-warning'
+              }`}
+              onClick={status?.status === 'paused' ? handleResumeWorkflow : handlePauseWorkflow}
+              disabled={!currentJobId || !['processing', 'paused'].includes(status?.status)}
+              title={
+                status?.status === 'paused' ? 'Resume workflow' : 
+                status?.status === 'processing' ? 'Pause workflow' : 
+                'Only available when processing or paused'
+              }
+            >
+              {status?.status === 'paused' ? (
                 <>
-                  <span className="loading loading-spinner loading-xs mr-2"></span>
-                  Running...
+                  <Play className="h-4 w-4 mr-2" />
+                  Resume
                 </>
               ) : (
                 <>
-                  <Play className="h-4 w-4 mr-2" />
-                  Run Background
+                  <Pause className="h-4 w-4 mr-2" />
+                  Stop
                 </>
               )}
+            </button>
+            
+            {/* Cancel Button */}
+            <button 
+              className="btn btn-error btn-sm px-4 font-medium shadow-lg transition-all duration-200"
+              onClick={handleCancelWorkflow}
+              disabled={!currentJobId || !['processing', 'paused'].includes(status?.status)}
+              title={
+                (currentJobId && ['processing', 'paused'].includes(status?.status))
+                  ? 'Permanently cancel workflow' 
+                  : 'No active workflow to cancel'
+              }
+            >
+              <X className="h-4 w-4 mr-2" />
+              Cancel
             </button>
           </div>
         </div>
