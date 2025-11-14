@@ -26,6 +26,7 @@ export const POST = withAuth(async (request, { user }) => {
     }
 
     // Update daily limit
+    // Note: accountId is the database UUID (id), not sessionId
     const [updated] = await db
       .update(linkedinAccounts)
       .set({ 
@@ -33,7 +34,7 @@ export const POST = withAuth(async (request, { user }) => {
         updatedAt: new Date()
       })
       .where(and(
-        eq(linkedinAccounts.sessionId, accountId),
+        eq(linkedinAccounts.id, accountId), // Use id (UUID) not sessionId
         eq(linkedinAccounts.userId, user.id) // Ensure user owns this account
       ))
       .returning();
