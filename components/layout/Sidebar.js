@@ -14,6 +14,7 @@ import {
   Plus,
   UserCheck,
   Workflow,
+  TrendingUp,
 } from "lucide-react";
 
 const menuItems = [
@@ -22,6 +23,18 @@ const menuItems = [
     label: "Campaigns", 
     href: "/dashboard/campaigns",
     key: "campaigns" 
+  },
+  { 
+    icon: TrendingUp, 
+    label: "Statistics", 
+    href: "/dashboard/statistics",
+    key: "statistics" 
+  },
+  { 
+    icon: Workflow, 
+    label: "Workflows", 
+    href: "/dashboard/workflow",
+    key: "workflow" 
   },
   { 
     icon: Users, 
@@ -46,12 +59,6 @@ const menuItems = [
     label: "Accounts", 
     href: "/dashboard/accounts",
     key: "accounts" 
-  },
-  { 
-    icon: Workflow, 
-    label: "Workflows", 
-    href: "/dashboard/workflow",
-    key: "workflow" 
   },
   { 
     icon: Settings, 

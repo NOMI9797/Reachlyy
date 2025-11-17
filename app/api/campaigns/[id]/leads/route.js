@@ -25,7 +25,18 @@ export const GET = withAuth(async (request, { params, user }) => {
 
     // Get leads for this campaign (ensure user owns the leads)
     const campaignLeads = await db
-      .select()
+      .select({
+        id: leads.id,
+        name: leads.name,
+        url: leads.url,
+        title: leads.title,
+        company: leads.company,
+        campaignId: leads.campaignId,
+        inviteSent: leads.inviteSent,
+        inviteStatus: leads.inviteStatus,
+        inviteSentAt: leads.inviteSentAt,
+        createdAt: leads.createdAt
+      })
       .from(leads)
       .where(and(eq(leads.campaignId, campaignId), eq(leads.userId, user.id)))
       .orderBy(leads.createdAt);

@@ -40,3 +40,12 @@ export const scrapingKeys = {
   // Scraping status for specific leads
   status: (leadIds) => [...scrapingKeys.all, 'status', leadIds],
 };
+
+export const statsKeys = {
+  // Base key for all statistics-related queries
+  all: ['stats'],
+  // Global statistics across all campaigns
+  global: () => [...statsKeys.all, 'global'],
+  // Statistics for a specific campaign
+  campaign: (id) => [...statsKeys.all, 'campaign', id],
+};
