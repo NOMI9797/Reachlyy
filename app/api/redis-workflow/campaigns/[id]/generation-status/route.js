@@ -49,7 +49,7 @@ export const GET = withAuth(async (request, { params, user }) => {
     const groupInfo = results[3][1];
     
     if (!leadsData || Object.keys(leadsData).length === 0) {
-      console.log(`📋 No leads found in Redis for campaign ${campaignId}`);
+      // No leads found - this is normal for new campaigns, don't log repeatedly
       return NextResponse.json({
         success: true,
         data: {

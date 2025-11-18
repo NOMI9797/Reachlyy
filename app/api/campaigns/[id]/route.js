@@ -3,6 +3,7 @@ import { db } from "@/libs/db";
 import { campaigns } from "@/libs/schema";
 import { eq, and } from "drizzle-orm";
 import { withAuth } from "@/libs/auth-middleware";
+import getRedisClient from "@/libs/redis";
 
 // GET /api/campaigns/[id] - Get a specific campaign for authenticated user
 export const GET = withAuth(async (request, { params, user }) => {
@@ -35,11 +36,23 @@ export const GET = withAuth(async (request, { params, user }) => {
   }
 });
 
-// PUT /api/campaigns/[id] - Update a campaign for authenticated user
+// PUT /api/campaigns/[id] - Update a campaign for authenticated user (Redis-first)
 export const PUT = withAuth(async (request, { params, user }) => {
   try {
     const campaignId = params.id;
     const updateData = await request.json();
+
+    const redis = getRedisClient();
+    const cacheKey = `user:${user.id}:campaigns:list`;
+
+    // ✅ REDIS-FIRST: Invalidate cache before DB operation
+    try {
+      await redis.del(cacheKey);
+      await redis.del(`campaign:${campaignId}:data`);
+      console.log(`✅ REDIS: Invalidated cache for campaign ${campaignId}`);
+    } catch (redisError) {
+      console.warn(`⚠️ Redis cache invalidation failed:`, redisError.message);
+    }
 
     // Check if campaign exists and belongs to user
     const [existingCampaign] = await db
@@ -55,7 +68,7 @@ export const PUT = withAuth(async (request, { params, user }) => {
       );
     }
 
-    // Update the campaign (ensure user owns it)
+    // ✅ DB: Update the campaign (ensure user owns it)
     const [updatedCampaign] = await db
       .update(campaigns)
       .set({
@@ -78,10 +91,24 @@ export const PUT = withAuth(async (request, { params, user }) => {
   }
 });
 
-// DELETE /api/campaigns/[id] - Delete a campaign for authenticated user
+// DELETE /api/campaigns/[id] - Delete a campaign for authenticated user (Redis-first)
 export const DELETE = withAuth(async (request, { params, user }) => {
   try {
     const campaignId = params.id;
+
+    const redis = getRedisClient();
+    const cacheKey = `user:${user.id}:campaigns:list`;
+
+    // ✅ REDIS-FIRST: Invalidate cache before DB operation
+    try {
+      await redis.del(cacheKey);
+      await redis.del(`campaign:${campaignId}:data`);
+      await redis.del(`campaign:${campaignId}:leads`);
+      await redis.del(`campaign:${campaignId}:messages`);
+      console.log(`✅ REDIS: Invalidated all cache for campaign ${campaignId}`);
+    } catch (redisError) {
+      console.warn(`⚠️ Redis cache invalidation failed:`, redisError.message);
+    }
 
     // Check if campaign exists and belongs to user
     const [existingCampaign] = await db
@@ -97,7 +124,7 @@ export const DELETE = withAuth(async (request, { params, user }) => {
       );
     }
 
-    // Delete the campaign (leads and posts will be cascaded, ensure user owns it)
+    // ✅ DB: Delete the campaign (leads and posts will be cascaded, ensure user owns it)
     await db
       .delete(campaigns)
       .where(and(eq(campaigns.id, campaignId), eq(campaigns.userId, user.id)));

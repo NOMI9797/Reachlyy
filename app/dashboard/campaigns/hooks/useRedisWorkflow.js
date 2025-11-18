@@ -133,23 +133,13 @@ export function useRedisWorkflow() {
     }
   });
 
-  // React Query hooks
+  // React Query hooks - No polling, just use React Query caching
   const useLeadsReadyForMessages = (campaignId) => {
     return useQuery({
       queryKey: ['redis-workflow-leads-ready', campaignId],
       queryFn: () => getLeadsReadyForMessages(campaignId),
       enabled: !!campaignId,
-      refetchInterval: (data) => {
-        // Stop polling if no leads are ready for messages
-        if (data?.data?.count === 0) {
-          console.log(`✅ LEADS POLLING: No leads ready - STOPPING polling`);
-          return false; // Stop polling
-        }
-        
-        // Continue polling every 5s if there are leads ready
-        console.log(`🔄 LEADS POLLING: ${data?.data?.count || 0} leads ready - polling every 5s`);
-        return 5000;
-      },
+      staleTime: 1000 * 60 * 5, // 5 minutes - data stays fresh
     });
   };
 
@@ -158,32 +148,7 @@ export function useRedisWorkflow() {
       queryKey: ['redis-workflow-status', campaignId],
       queryFn: () => getGenerationStatus(campaignId),
       enabled: !!campaignId,
-      refetchInterval: (data) => {
-        // Smart polling based on campaign state
-        if (!data?.data) return 10000; // 10s if no data
-        
-        const { redis, leads } = data.data;
-        const queueLength = redis?.queueLength || 0;
-        const hasPendingLeads = leads?.pending > 0;
-        const hasCompletedLeads = leads?.completed > 0;
-        const isCurrentlyProcessing = isProcessing;
-        
-        // Active state: Poll every 2s when there's work
-        if (queueLength > 0 || isProcessing || hasPendingLeads) {
-          console.log(`🔄 SMART POLLING: Active state - polling every 2s (queue: ${queueLength}, processing: ${isProcessing})`);
-          return 2000;
-        }
-        
-        // Idle state: Poll every 10s when no active work but has completed leads
-        if (hasCompletedLeads) {
-          console.log(`⏸️ SMART POLLING: Idle state - polling every 10s (completed: ${leads.completed})`);
-          return 10000;
-        }
-        
-        // Stable state: STOP POLLING when everything is done
-        console.log(`✅ SMART POLLING: Stable state - STOPPING polling (no active work)`);
-        return false; // Stop polling completely
-      },
+      staleTime: 1000 * 60 * 5, // 5 minutes - data stays fresh
     });
   };
 

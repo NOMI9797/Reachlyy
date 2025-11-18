@@ -22,25 +22,6 @@ export default function CampaignsPage() {
     }
   }, [session, status, router]);
 
-  // Background pre-fetch campaigns to Redis on page load
-  useEffect(() => {
-    if (session?.user?.id) {
-      // Trigger background pre-fetch (logs will show in terminal)
-      fetch('/api/redis-workflow/campaigns/pre-fetch', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: session.user.id }),
-      })
-      .then(response => response.json())
-      .then(data => {
-        // Silent success - logs are in terminal
-      })
-      .catch(error => {
-        // Silent error - logs are in terminal
-      });
-    }
-  }, [session?.user?.id]);
-
   if (status === "loading") {
     return (
       <div className="min-h-screen bg-base-100 flex items-center justify-center">

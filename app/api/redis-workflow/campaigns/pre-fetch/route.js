@@ -26,16 +26,60 @@ export const POST = withAuth(async (request, { user }) => {
       return NextResponse.json({ success: true, message: 'Pre-fetch already running', data: { userId, running: true } }, { status: 202 });
     }
 
-    console.log(`🚀 PRE-FETCH START: Starting bulk pre-fetch for user ${userId}`);
+    // Check if we have fresh cache (within 5 minutes)
+    const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+    const now = Date.now();
     
-    // Bulk fetch campaigns for the authenticated user
-    console.log(`📊 PRE-FETCH STEP 1: Fetching campaigns from database...`);
+    // Get all campaigns from DB first to check cache
+    console.log(`📊 PRE-FETCH STEP 1: Checking cache freshness...`);
     const userCampaigns = await db.select()
       .from(campaigns)
       .where(eq(campaigns.userId, user.id));
 
-    console.log(`📊 PRE-FETCH STEP 1: Found ${userCampaigns.length} campaigns in database`);
+    if (userCampaigns.length === 0) {
+      console.log(`⏭️ PRE-FETCH SKIPPED: No campaigns found for user ${userId}`);
+      await redis.del(lockKey);
+      return NextResponse.json({
+        success: true,
+        message: 'No campaigns to pre-fetch',
+        data: { userId, campaignsTotal: 0, campaignsCached: 0, campaignsSkipped: 0, totalLeadsCached: 0 }
+      });
+    }
 
+    // Check cache freshness for all campaigns
+    let needsRefresh = false;
+    const cacheChecks = await Promise.all(
+      userCampaigns.map(async (campaign) => {
+        const existingData = await redis.hgetall(`campaign:${campaign.id}:data`);
+        if (!existingData || !existingData.id || !existingData.lastUpdated) {
+          return true; // Missing cache
+        }
+        const lastUpdated = parseInt(existingData.lastUpdated, 10);
+        const age = now - lastUpdated;
+        return age > CACHE_TTL_MS; // Stale cache
+      })
+    );
+    
+    needsRefresh = cacheChecks.some(check => check === true);
+    
+    if (!needsRefresh) {
+      console.log(`✅ PRE-FETCH SKIPPED: All campaigns have fresh cache (within ${CACHE_TTL_MS / 1000 / 60} minutes)`);
+      await redis.del(lockKey);
+      return NextResponse.json({
+        success: true,
+        message: 'Cache is fresh, no pre-fetch needed',
+        data: {
+          userId,
+          campaignsTotal: userCampaigns.length,
+          campaignsCached: 0,
+          campaignsSkipped: userCampaigns.length,
+          totalLeadsCached: 0,
+          cached: true
+        }
+      });
+    }
+
+    console.log(`🚀 PRE-FETCH START: Cache is stale or missing, refreshing for user ${userId}`);
     console.log(`📊 PRE-FETCH STEP 2: Caching campaigns and leads to Redis...`);
     
     let totalLeadsCached = 0;
@@ -44,17 +88,21 @@ export const POST = withAuth(async (request, { user }) => {
     
     // Pre-fetch leads for each campaign (bulk)
     for (const campaign of userCampaigns) {
-      // Check if campaign is already cached
+      // Check if campaign cache is fresh
       const existingData = await redis.hgetall(`campaign:${campaign.id}:data`);
       const existingLeads = await redis.hgetall(`campaign:${campaign.id}:leads`);
       
-      // Always refresh cache to get latest data from database
-      // if (existingData && existingData.id && existingLeads && Object.keys(existingLeads).length > 0) {
-      //   console.log(`⏭️ PRE-FETCH: ${campaign.name} (${campaign.id}) → SKIPPED (already cached)`);
-      //   campaignsSkipped++;
-      //   totalLeadsCached += Object.keys(existingLeads).length;
-      //   continue;
-      // }
+      // Skip if cache is fresh (within TTL)
+      if (existingData && existingData.id && existingData.lastUpdated) {
+        const lastUpdated = parseInt(existingData.lastUpdated, 10);
+        const age = now - lastUpdated;
+        if (age <= CACHE_TTL_MS && existingLeads && Object.keys(existingLeads).length > 0) {
+          console.log(`⏭️ PRE-FETCH: ${campaign.name} (${campaign.id}) → SKIPPED (fresh cache, ${Math.round(age / 1000)}s old)`);
+          campaignsSkipped++;
+          totalLeadsCached += Object.keys(existingLeads).length;
+          continue;
+        }
+      }
       
       const campaignLeads = await db.select()
         .from(leads)
