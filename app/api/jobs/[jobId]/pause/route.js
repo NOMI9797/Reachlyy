@@ -58,9 +58,11 @@ export async function POST(request, { params }) {
 
     console.log(`⏸️  Job paused: ${jobId.substring(0, 8)}... | Pause count: ${updatedJob[0].pauseCount}`);
 
-    // Publish to Redis for instant worker notification
+    // Publish to Redis for instant worker notification and SSE updates
     try {
       const redis = getRedisClient();
+      
+      // Publish control signal for worker
       await redis.publish(
         `job:${jobId}:control`,
         JSON.stringify({
@@ -70,6 +72,24 @@ export async function POST(request, { params }) {
           pauseCount: updatedJob[0].pauseCount
         })
       );
+      
+      // Publish status update for SSE stream
+      await redis.publish(
+        `job:${jobId}:status`,
+        JSON.stringify({
+          type: 'status',
+          jobId: updatedJob[0].id,
+          campaignId: job.campaignId,
+          status: 'paused',
+          progress: updatedJob[0].progress || 0,
+          totalLeads: updatedJob[0].totalLeads,
+          processedLeads: updatedJob[0].processedLeads || 0,
+          pausedAt: updatedJob[0].pausedAt,
+          pauseCount: updatedJob[0].pauseCount,
+          timestamp: Date.now()
+        })
+      );
+      
       console.log(`📢 Published PAUSE signal to Redis | Job: ${jobId.substring(0, 8)}... | Count: ${updatedJob[0].pauseCount}`);
     } catch (redisError) {
       console.error('⚠️  Redis publish failed (worker will use DB fallback):', redisError.message);

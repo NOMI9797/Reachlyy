@@ -18,6 +18,8 @@ import { createClient } from 'redis';
 
 // Global Redis subscriber for event-driven job control
 let redisSubscriber = null;
+// Global Redis publisher for progress updates
+let redisPublisher = null;
 
 const jobId = process.argv[2];
 
@@ -91,6 +93,46 @@ async function setupControlListener(jobId) {
 }
 
 /**
+ * Setup Redis publisher for progress updates
+ */
+async function setupProgressPublisher(jobId) {
+  try {
+    redisPublisher = createClient({
+      url: process.env.REDIS_URL || 'redis://localhost:6379'
+    });
+
+    redisPublisher.on('error', (err) => {
+      console.error('⚠️  Redis Publisher Error:', err.message);
+    });
+
+    await redisPublisher.connect();
+    console.log(`📡 Redis publisher connected for job ${jobId.substring(0, 8)}...`);
+    return true;
+  } catch (error) {
+    console.error('⚠️  Redis publisher setup failed:', error.message);
+    return false;
+  }
+}
+
+/**
+ * Publish progress update to Redis Pub/Sub
+ */
+async function publishProgress(jobId, data) {
+  if (!redisPublisher) return;
+  
+  try {
+    const channel = `job:${jobId}:status`;
+    await redisPublisher.publish(channel, JSON.stringify({
+      ...data,
+      timestamp: Date.now()
+    }));
+  } catch (error) {
+    console.warn('⚠️  Failed to publish progress to Redis:', error.message);
+    // Don't fail the workflow if Redis publish fails
+  }
+}
+
+/**
  * Cleanup Redis subscriber connection
  */
 async function cleanupRedisSubscriber() {
@@ -104,16 +146,32 @@ async function cleanupRedisSubscriber() {
   }
 }
 
+/**
+ * Cleanup Redis publisher connection
+ */
+async function cleanupRedisPublisher() {
+  if (redisPublisher) {
+    try {
+      await redisPublisher.quit();
+      console.log('🔌 Redis publisher disconnected');
+    } catch (error) {
+      console.error('⚠️  Error disconnecting Redis publisher:', error.message);
+    }
+  }
+}
+
 // Handle process termination signals
 process.on('SIGTERM', async () => {
   console.log('\n🛑 SIGTERM received - shutting down gracefully...');
   await cleanupRedisSubscriber();
+  await cleanupRedisPublisher();
   process.exit(0);
 });
 
 process.on('SIGINT', async () => {
   console.log('\n🛑 SIGINT received - shutting down gracefully...');
   await cleanupRedisSubscriber();
+  await cleanupRedisPublisher();
   process.exit(0);
 });
 
@@ -144,6 +202,28 @@ async function runJob() {
       console.log('✅ Real-time control: ENABLED (Redis Pub/Sub)');
     } else {
       console.log('⚠️  Real-time control: DISABLED (using DB fallback)');
+    }
+    
+    // Setup Redis publisher for progress updates
+    console.log('📡 Setting up progress publisher...');
+    const publisherEnabled = await setupProgressPublisher(jobId);
+    
+    if (publisherEnabled) {
+      console.log('✅ Progress publisher: ENABLED (Redis Pub/Sub)');
+      
+      // Publish initial "processing" status
+      await publishProgress(jobId, {
+        type: 'status',
+        jobId: jobId,
+        campaignId: job.campaignId,
+        status: 'processing',
+        progress: 0,
+        totalLeads: null, // Will be set when leads are fetched
+        processedLeads: job.processedLeads || 0,
+        startedAt: new Date().toISOString()
+      });
+    } else {
+      console.log('⚠️  Progress publisher: DISABLED (updates will only go to DB)');
     }
     
     // Get LinkedIn Account Data
@@ -255,22 +335,54 @@ async function runJob() {
         const batchPage = sessionResult.page;
         
         // Process Invites with Progress Callback
-        // Progress callback to update database in real-time
+        // Progress callback to update database and publish to Redis in real-time
         const progressCallback = async (progressData) => {
           if (progressData.type === 'progress') {
-            currentLeadIndex++;
-            const progress = Math.round((currentLeadIndex / leadsToProcess.length) * 100);
+            // Handle fractional progress (e.g., 0.5 means 50% through current lead)
+            const fractionalProgress = progressData.current || 0;
+            const totalLeads = leadsToProcess.length;
+            
+            // Calculate actual progress: if we're at lead 2.5, that means 2.5/10 = 25% complete
+            const actualProgress = Math.min(Math.round((fractionalProgress / totalLeads) * 100), 100);
+            const processedLeads = Math.floor(fractionalProgress); // Integer part (completed leads)
+            const currentLead = Math.ceil(fractionalProgress); // Current lead being processed (1-indexed)
+            
+            // Only update currentLeadIndex when we complete a lead (fractionalProgress is whole number)
+            if (fractionalProgress % 1 === 0 && fractionalProgress > currentLeadIndex) {
+              currentLeadIndex = fractionalProgress;
+            }
             
             try {
-              // Update progress
-              await db.update(workflowJobs)
-                .set({
-                  processedLeads: currentLeadIndex,
-                  progress
-                })
-                .where(eq(workflowJobs.id, jobId));
+              // ✅ REDIS-FIRST: Publish progress to Redis Pub/Sub (instant updates)
+              await publishProgress(jobId, {
+                type: 'status',
+                jobId: jobId,
+                campaignId: job.campaignId,
+                status: 'processing',
+                progress: actualProgress,
+                totalLeads: totalLeads,
+                processedLeads: processedLeads,
+                currentLead: currentLead, // Current lead number (for smoother progress bar)
+                fractionalProgress: fractionalProgress, // For precise progress calculation
+                stage: progressData.stage || 'processing', // e.g., 'navigating', 'clicking', 'sending'
+                timestamp: Date.now()
+              });
               
-              console.log(`  📊 Progress: ${currentLeadIndex}/${leadsToProcess.length} (${progress}%)`);
+              // ✅ DB: Update progress in database (only on whole number progress to reduce DB writes)
+              // Update DB less frequently to reduce load, but still update Redis for smooth UI
+              if (fractionalProgress % 1 === 0) {
+                await db.update(workflowJobs)
+                  .set({
+                    processedLeads: processedLeads,
+                    progress: actualProgress
+                  })
+                  .where(eq(workflowJobs.id, jobId));
+              }
+              
+              // Only log major milestones to reduce console noise
+              if (fractionalProgress % 1 === 0 || progressData.stage === 'sending') {
+                console.log(`  📊 Progress: ${processedLeads}/${totalLeads} (${actualProgress}%)${progressData.stage ? ` - ${progressData.stage}` : ''}`);
+              }
               
               // 🔥 Increment daily counter immediately for successfully sent invites
               if (progressData.status === 'sent') {
@@ -279,7 +391,7 @@ async function runJob() {
               }
               
               // 🔥 FALLBACK: Check for pause/cancel after every lead if Redis is unavailable
-              if (!useRedisControl) {
+              if (!useRedisControl && fractionalProgress % 1 === 0) {
                 const currentJob = await db.query.workflowJobs.findFirst({
                   where: eq(workflowJobs.id, jobId),
                   columns: { status: true }  // Only fetch status column (optimization)
@@ -287,7 +399,7 @@ async function runJob() {
                 
                 if (currentJob && (currentJob.status === 'paused' || currentJob.status === 'cancelled')) {
                   console.log(`🛑 [FALLBACK] Job ${currentJob.status} detected during lead processing`);
-                  console.log(`   Exiting after lead ${currentLeadIndex}/${leadsToProcess.length}`);
+                  console.log(`   Exiting after lead ${processedLeads}/${totalLeads}`);
                   
                   // Throw error to break out of invite processing loop
                   throw new Error(`WORKFLOW_${currentJob.status.toUpperCase()}`);
@@ -386,6 +498,26 @@ async function runJob() {
     // Update Job Status to Completed
     console.log(`\n✅ Workflow Complete | Sent: ${totalSent} | Failed: ${totalFailed} | Already: ${totalAlreadyConnected + totalAlreadyPending}`);
     
+    // ✅ REDIS-FIRST: Publish completion to Redis
+    await publishProgress(jobId, {
+      type: 'status',
+      jobId: jobId,
+      campaignId: job.campaignId,
+      status: 'completed',
+      progress: 100,
+      totalLeads: leadsToProcess.length,
+      processedLeads: currentLeadIndex,
+      results: {
+        total: leadsToProcess.length,
+        sent: totalSent,
+        failed: totalFailed,
+        alreadyConnected: totalAlreadyConnected,
+        alreadyPending: totalAlreadyPending
+      },
+      completedAt: new Date().toISOString()
+    });
+    
+    // ✅ DB: Update job status in database
     await db.update(workflowJobs)
       .set({
         status: 'completed',
@@ -402,13 +534,26 @@ async function runJob() {
       })
       .where(eq(workflowJobs.id, jobId));
     
+    // Cleanup Redis connections
+    await cleanupRedisPublisher();
+    
     console.log(`👋 Exit: 0\n`);
     process.exit(0);
     
   } catch (error) {
     console.error(`\n❌ Job Failed | Error: ${error.message}`);
     
-    // Update job status to failed
+    // ✅ REDIS-FIRST: Publish failure to Redis
+    await publishProgress(jobId, {
+      type: 'status',
+      jobId: jobId,
+      campaignId: job?.campaignId,
+      status: 'failed',
+      errorMessage: error.message,
+      completedAt: new Date().toISOString()
+    });
+    
+    // ✅ DB: Update job status to failed
     await db.update(workflowJobs)
       .set({
         status: 'failed',
@@ -417,12 +562,16 @@ async function runJob() {
       })
       .where(eq(workflowJobs.id, jobId));
     
+    // Cleanup Redis connections
+    await cleanupRedisPublisher();
+    
     console.log(`👋 Exit: 1\n`);
     process.exit(1);
     
   } finally {
-    // Always cleanup Redis subscriber
+    // Always cleanup Redis connections
     await cleanupRedisSubscriber();
+    await cleanupRedisPublisher();
   }
 }
 

@@ -41,12 +41,16 @@ export async function GET(request, { params }) {
     return NextResponse.json({ 
       job: {
         id: job.id,
+        campaignId: job.campaignId,
         status: job.status,
         processedLeads: job.processedLeads,
         totalLeads: job.totalLeads,
         progress: job.progress,
+        results: job.results,
+        errorMessage: job.errorMessage,
         createdAt: job.createdAt,
         startedAt: job.startedAt,
+        completedAt: job.completedAt,
         pausedAt: job.pausedAt
       }
     });

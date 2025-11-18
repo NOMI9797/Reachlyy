@@ -58,9 +58,11 @@ export async function POST(request, { params }) {
 
     console.log(`🛑 Job cancelled: ${jobId.substring(0, 8)}... | Progress: ${job.processedLeads}/${job.totalLeads}`);
 
-    // Publish to Redis for instant worker notification
+    // Publish to Redis for instant worker notification and SSE updates
     try {
       const redis = getRedisClient();
+      
+      // Publish control signal for worker
       await redis.publish(
         `job:${jobId}:control`,
         JSON.stringify({
@@ -69,6 +71,24 @@ export async function POST(request, { params }) {
           userId: session.user.id
         })
       );
+      
+      // Publish status update for SSE stream
+      await redis.publish(
+        `job:${jobId}:status`,
+        JSON.stringify({
+          type: 'status',
+          jobId: updatedJob[0].id,
+          campaignId: job.campaignId,
+          status: 'cancelled',
+          progress: updatedJob[0].progress || 0,
+          totalLeads: updatedJob[0].totalLeads,
+          processedLeads: updatedJob[0].processedLeads || 0,
+          errorMessage: 'Cancelled by user',
+          completedAt: updatedJob[0].completedAt,
+          timestamp: Date.now()
+        })
+      );
+      
       console.log(`📢 Published CANCEL signal to Redis | Job: ${jobId.substring(0, 8)}...`);
     } catch (redisError) {
       console.error('⚠️  Redis publish failed (worker will use DB fallback):', redisError.message);

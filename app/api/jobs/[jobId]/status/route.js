@@ -17,8 +17,6 @@ export const GET = withAuth(async (request, { params, user }) => {
   try {
     const { jobId } = params;
     
-    console.log(`📊 GET JOB STATUS: ${jobId}`);
-    
     // Fetch job from database
     const job = await db.query.workflowJobs.findFirst({
       where: and(

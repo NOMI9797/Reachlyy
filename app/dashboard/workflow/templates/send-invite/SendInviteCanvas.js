@@ -110,13 +110,35 @@ export default function SendInviteCanvas({ campaignName, campaignId }) {
   const [activationStatus, setActivationStatus] = useState(null);
   
   // Progress state for SSE
-  const [progress, setProgress] = useState({ current: 0, total: 0 });
+  const [progress, setProgress] = useState({ current: 0, total: 0, stage: null });
   const [isProcessing, setIsProcessing] = useState(false);
+  
+  // Stage descriptions for user-friendly display
+  const stageDescriptions = {
+    'starting': 'Starting to process lead...',
+    'navigating': 'Visiting profile...',
+    'checking': 'Checking connection status...',
+    'finding_button': 'Finding Connect button...',
+    'clicking': 'Clicking Connect button...',
+    'waiting_modal': 'Waiting for modal...',
+    'sending': 'Sending invitation...',
+    'completed': 'Invite sent successfully!',
+    'already_processed': 'Lead already processed',
+    'already_pending': 'Invite already pending',
+    'already_connected': 'Already connected',
+    'failed': 'Failed to process',
+    'processing': 'Processing...'
+  };
+  
+  const getStageDescription = (stage) => {
+    if (!stage) return 'Processing...';
+    return stageDescriptions[stage] || `Processing: ${stage}`;
+  };
   
   // Background mode state
   const [currentJobId, setCurrentJobId] = useState(null);
   const [status, setStatus] = useState(null);
-  const pollIntervalRef = useRef(null);
+  const eventSourceRef = useRef(null);
 
   const onInit = useCallback((instance) => {
     rf.current = instance;
@@ -150,7 +172,7 @@ export default function SendInviteCanvas({ campaignName, campaignId }) {
 
     setIsRunning(true);
     setActivationStatus(null);
-    setProgress({ current: 0, total: 0 });
+    setProgress({ current: 0, total: 0, stage: null });
     setIsProcessing(true);
 
     try {
@@ -188,8 +210,8 @@ export default function SendInviteCanvas({ campaignName, campaignId }) {
               details: `Resuming existing workflow (${errorData.progress || 0}% complete). Progress: ${errorData.processedLeads || 0}/${errorData.totalLeads || 0}`
             });
             
-            // Start polling the existing job
-            startPolling(errorData.jobId);
+            // Set job ID - SSE will automatically connect
+            setCurrentJobId(errorData.jobId);
             return;
           } else {
             // Different campaign - show error and don't proceed
@@ -223,8 +245,7 @@ export default function SendInviteCanvas({ campaignName, campaignId }) {
 
       console.log(`✅ Workflow started: Job ${jobId}`);
 
-      // Start polling
-      startPolling(jobId);
+      // SSE will automatically connect when currentJobId is set
 
     } catch (error) {
       console.error('❌ Start workflow error:', error);
@@ -238,134 +259,165 @@ export default function SendInviteCanvas({ campaignName, campaignId }) {
     }
   };
 
-  const startPolling = (jobId) => {
-    console.log(`📊 Starting polling for job: ${jobId}`);
-    
-    if (pollIntervalRef.current) {
-      clearInterval(pollIntervalRef.current);
+  // SSE connection for real-time job status updates
+  useEffect(() => {
+    if (!currentJobId) {
+      // Close existing connection if job ID is cleared
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close();
+        eventSourceRef.current = null;
+      }
+      return;
     }
-    
-    pollIntervalRef.current = setInterval(async () => {
+
+    console.log(`📡 Connecting to SSE stream for job: ${currentJobId.substring(0, 8)}...`);
+
+    // Create EventSource connection
+    const eventSource = new EventSource(`/api/jobs/${currentJobId}/stream`);
+    eventSourceRef.current = eventSource;
+
+    eventSource.onopen = () => {
+      console.log('✅ SSE connection opened');
+    };
+
+    eventSource.onmessage = (event) => {
       try {
-        const statusRes = await fetch(`/api/jobs/${jobId}/status`);
+        const data = JSON.parse(event.data);
         
-        if (!statusRes.ok) {
-          console.error(`❌ Failed to fetch job status: ${statusRes.status}`);
+        if (data.type === 'connected') {
+          console.log('✅ SSE connected to job stream');
           return;
         }
-        
-        const status = await statusRes.json();
-        
-        console.log(`📊 Poll result: ${status.status} - ${status.processedLeads}/${status.totalLeads}`);
-        
-        // Update status state
-        setStatus(status);
-        
-        // Update progress
-        setProgress({ 
-          current: status.processedLeads || 0, 
-          total: status.totalLeads || 0 
-        });
-        
-        // Check if job is complete
-        if (status.status === 'completed') {
-          clearInterval(pollIntervalRef.current);
-          pollIntervalRef.current = null;
-          setIsRunning(false);
-          setIsProcessing(false);
+
+        if (data.type === 'status') {
+          // Use fractionalProgress for smooth progress bar, fallback to currentLead or processedLeads
+          const currentProgress = data.fractionalProgress !== undefined 
+            ? data.fractionalProgress 
+            : (data.currentLead || data.processedLeads || 0);
+          const stageInfo = data.stage ? ` (${data.stage})` : '';
           
-          // Check if it was skipped (0 eligible leads or other no-op scenarios)
-          if (status.results?.skipped) {
+          console.log(`📊 Job status update: ${data.status} - ${Math.ceil(currentProgress)}/${data.totalLeads} (${data.progress}%)${stageInfo}`);
+          
+          // Update status
+          setStatus(data);
+          
+          // Update progress with fractional progress and current stage for smoother bar movement
+          setProgress({ 
+            current: currentProgress, 
+            total: data.totalLeads || 0,
+            stage: data.stage || null
+          });
+          
+          // Handle different job statuses
+          if (data.status === 'completed') {
+            setIsRunning(false);
+            setIsProcessing(false);
+            
+            // Check if it was skipped
+            if (data.results?.skipped) {
+              setActivationStatus({
+                type: 'info',
+                message: '✅ Workflow completed - Nothing to do',
+                details: data.results.message || 'All leads in this campaign have already been processed.'
+              });
+            } else {
+              setActivationStatus({
+                type: 'success',
+                message: '✅ Workflow completed!',
+                details: data.results ? 
+                  `Sent: ${data.results.sent}, Already Connected: ${data.results.alreadyConnected}, Already Pending: ${data.results.alreadyPending}, Failed: ${data.results.failed}` : 
+                  'Workflow completed successfully'
+              });
+            }
+            
+            // Clear localStorage
+            localStorage.removeItem('currentJobId');
+            localStorage.removeItem('currentCampaignId');
+            
+          } else if (data.status === 'paused') {
+            setIsRunning(false);
+            setIsProcessing(false);
+            
             setActivationStatus({
               type: 'info',
-              message: '✅ Workflow completed - Nothing to do',
-              details: status.results.message || 'All leads in this campaign have already been processed.'
+              message: '⏸️ Workflow paused',
+              details: 'Click Resume to continue where you left off.'
             });
-            console.log(`ℹ️  Workflow completed with no action needed`);
-          } else {
-            // Normal completion with results
+            
+          } else if (data.status === 'cancelled') {
+            setIsRunning(false);
+            setIsProcessing(false);
+            
             setActivationStatus({
-              type: 'success',
-              message: '✅ Workflow completed!',
-              details: status.results ? 
-                `Sent: ${status.results.sent}, Already Connected: ${status.results.alreadyConnected}, Already Pending: ${status.results.alreadyPending}, Failed: ${status.results.failed}` : 
-                'Workflow completed successfully'
+              type: 'warning',
+              message: '🛑 Workflow cancelled',
+              details: 'Workflow was cancelled by user.'
             });
-            console.log(`🎉 Workflow completed!`);
+            
+            // Reset state
+            setCurrentJobId(null);
+            setProgress({ current: 0, total: 0, stage: null });
+            
+            // Clear localStorage
+            localStorage.removeItem('currentJobId');
+            localStorage.removeItem('currentCampaignId');
+            
+          } else if (data.status === 'failed' || data.status === 'timeout') {
+            setIsRunning(false);
+            setIsProcessing(false);
+            
+            const isTimeout = data.status === 'timeout';
+            
+            setActivationStatus({ 
+              type: 'error', 
+              message: isTimeout ? '⏱️ Workflow timed out' : '❌ Workflow failed', 
+              details: data.errorMessage || (isTimeout ? 'The workflow took too long and may have crashed. Please try again.' : 'An error occurred during workflow execution.')
+            });
+            
+            // Clear localStorage
+            localStorage.removeItem('currentJobId');
+            localStorage.removeItem('currentCampaignId');
+            
+          } else if (data.status === 'processing' || data.status === 'queued') {
+            setIsRunning(true);
+            setIsProcessing(true);
           }
-          
-          console.log(`✅ Polling stopped - Job completed`);
-          
-          // Clear localStorage
-          localStorage.removeItem('currentJobId');
-          localStorage.removeItem('currentCampaignId');
-          
-        } else if (status.status === 'paused') {
-          // STOP POLLING - Job is idle
-          clearInterval(pollIntervalRef.current);
-          pollIntervalRef.current = null;
-          setIsRunning(false);
-          setIsProcessing(false);
-          
-          setActivationStatus({
-            type: 'info',
-            message: '⏸️ Workflow paused',
-            details: 'Click Resume to continue where you left off.'
-          });
-          
-          console.log(`⏸️ Polling stopped - Job paused (idle state)`);
-          
-        } else if (status.status === 'cancelled') {
-          clearInterval(pollIntervalRef.current);
-          pollIntervalRef.current = null;
-          setIsRunning(false);
-          setIsProcessing(false);
-          
-          setActivationStatus({
-            type: 'warning',
-            message: '🛑 Workflow cancelled',
-            details: 'Workflow was cancelled by user.'
-          });
-          
-          // Reset all state after cancellation
-          setCurrentJobId(null);
-          setProgress({ current: 0, total: 0 });
-          
-          console.log(`🛑 Polling stopped - Job cancelled`);
-          
-          // Clear localStorage
-          localStorage.removeItem('currentJobId');
-          localStorage.removeItem('currentCampaignId');
-          
-          console.log(`🛑 Workflow cancelled`);
-          
-        } else if (status.status === 'failed' || status.status === 'timeout') {
-          clearInterval(pollIntervalRef.current);
-          pollIntervalRef.current = null;
-          setIsRunning(false);
-          setIsProcessing(false);
-          
-          const isTimeout = status.status === 'timeout';
-          
-          setActivationStatus({ 
-            type: 'error', 
-            message: isTimeout ? '⏱️ Workflow timed out' : '❌ Workflow failed', 
-            details: status.errorMessage || (isTimeout ? 'The workflow took too long and may have crashed. Please try again.' : 'An error occurred during workflow execution.')
-          });
-          
-          console.log(`❌ Polling stopped - Job ${isTimeout ? 'timed out' : 'failed'}`);
-          
-          // Clear localStorage
-          localStorage.removeItem('currentJobId');
-          localStorage.removeItem('currentCampaignId');
-          
-          console.error(`❌ Workflow ${status.status}: ${status.errorMessage}`);
         }
-      } catch (pollError) {
-        console.error('❌ Poll error:', pollError);
+
+        if (data.type === 'complete') {
+          console.log('✅ SSE stream completed');
+          eventSource.close();
+        }
+
+        if (data.type === 'error') {
+          console.error('❌ SSE error:', data.message);
+          setActivationStatus({
+            type: 'error',
+            message: 'Connection error',
+            details: data.message
+          });
+          eventSource.close();
+        }
+
+      } catch (error) {
+        console.error('❌ Failed to parse SSE data:', error);
       }
-    }, 3000); // Poll every 3 seconds
-  };
+    };
+
+    eventSource.onerror = (error) => {
+      console.error('❌ SSE connection error:', error);
+      // EventSource will automatically reconnect, so we don't need to handle it
+    };
+
+    // Cleanup on unmount or job ID change
+    return () => {
+      if (eventSourceRef.current) {
+        console.log('🧹 Closing SSE connection');
+        eventSourceRef.current.close();
+        eventSourceRef.current = null;
+      }
+    };
+  }, [currentJobId]);
 
   // Pause workflow
   const handlePauseWorkflow = async () => {
@@ -431,9 +483,7 @@ export default function SendInviteCanvas({ campaignName, campaignId }) {
       setIsRunning(true);
       setIsProcessing(true);
       
-      // Restart polling for resumed job
-      console.log(`🔄 Restarting polling for resumed job: ${currentJobId.substring(0, 8)}...`);
-      startPolling(currentJobId);
+      // SSE will automatically connect when currentJobId is set
       
     } catch (error) {
       console.error('❌ Resume error:', error);
@@ -475,18 +525,13 @@ export default function SendInviteCanvas({ campaignName, campaignId }) {
       setIsRunning(false);
       setIsProcessing(false);
       setCurrentJobId(null);
-      setProgress({ current: 0, total: 0 });
-      setStatus(null);
+      setProgress({ current: 0, total: 0, stage: null });
       
       // Clear localStorage
       localStorage.removeItem('currentJobId');
       localStorage.removeItem('currentCampaignId');
       
-      // Stop polling
-      if (pollIntervalRef.current) {
-        clearInterval(pollIntervalRef.current);
-        pollIntervalRef.current = null;
-      }
+      // SSE will automatically close when currentJobId is null
     } catch (error) {
       console.error('❌ Cancel error:', error);
       setActivationStatus({
@@ -509,7 +554,7 @@ export default function SendInviteCanvas({ campaignName, campaignId }) {
 
     setIsRunning(true);
     setActivationStatus(null);
-    setProgress({ current: 0, total: 0 });
+    setProgress({ current: 0, total: 0, stage: null });
     setIsProcessing(true);
 
     console.log(`🚀 Starting SSE workflow for campaign: ${campaignId}`);
@@ -731,12 +776,30 @@ export default function SendInviteCanvas({ campaignName, campaignId }) {
           
           // Restore job state
           setCurrentJobId(job.id);
-          setStatus({ ...job, status: job.status });
           setIsRunning(job.status !== 'paused');
           setIsProcessing(job.status === 'processing');
           setProgress({ 
             current: job.processedLeads || 0, 
-            total: job.totalLeads || 0 
+            total: job.totalLeads || 0,
+            stage: null
+          });
+          
+          // ✅ CRITICAL: Set status state so button visibility works correctly
+          // This matches the structure that SSE events use
+          setStatus({
+            type: 'status',
+            jobId: job.id,
+            campaignId: job.campaignId,
+            status: job.status,
+            progress: job.progress || 0,
+            totalLeads: job.totalLeads,
+            processedLeads: job.processedLeads || 0,
+            results: job.results,
+            errorMessage: job.errorMessage,
+            createdAt: job.createdAt,
+            startedAt: job.startedAt,
+            completedAt: job.completedAt,
+            pausedAt: job.pausedAt
           });
           
           // Save to localStorage
@@ -758,8 +821,7 @@ export default function SendInviteCanvas({ campaignName, campaignId }) {
             });
           }
           
-          // Start polling
-          startPolling(job.id);
+          // SSE will automatically connect when currentJobId is set
         } else {
           console.log('No active jobs found for this campaign');
         }
@@ -769,14 +831,6 @@ export default function SendInviteCanvas({ campaignName, campaignId }) {
     };
     
     checkForActiveJob();
-    
-    // Cleanup on unmount
-    return () => {
-      if (pollIntervalRef.current) {
-        console.log('🧹 Cleaning up polling interval on unmount');
-        clearInterval(pollIntervalRef.current);
-      }
-    };
   }, [campaignId]);
 
   return (
@@ -875,12 +929,12 @@ export default function SendInviteCanvas({ campaignName, campaignId }) {
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs font-medium text-base-content flex items-center gap-1.5">
                   <span className="loading loading-spinner loading-xs text-primary"></span>
-                  {progress.current === 0 && progress.total === 1 ? 'Connecting...' : 'Processing'}
+                  {progress.stage ? getStageDescription(progress.stage) : (progress.current === 0 && progress.total === 1 ? 'Connecting...' : 'Processing...')}
                 </span>
                 <span className="text-xs font-mono font-semibold text-primary">
                   {progress.current === 0 && progress.total === 1 
                     ? '...' 
-                    : `${progress.current}/${progress.total} (${Math.round((progress.current / progress.total) * 100)}%)`
+                    : `${Math.ceil(progress.current)}/${progress.total} (${Math.round((progress.current / progress.total) * 100)}%)`
                   }
                 </span>
               </div>
@@ -956,10 +1010,10 @@ export default function SendInviteCanvas({ campaignName, campaignId }) {
                 status?.status === 'paused' ? 'btn-success' : 'btn-warning'
               }`}
               onClick={status?.status === 'paused' ? handleResumeWorkflow : handlePauseWorkflow}
-              disabled={!currentJobId || !['processing', 'paused'].includes(status?.status)}
+              disabled={!currentJobId || !status || !['processing', 'paused', 'queued'].includes(status?.status)}
               title={
                 status?.status === 'paused' ? 'Resume workflow' : 
-                status?.status === 'processing' ? 'Pause workflow' : 
+                status?.status === 'processing' || status?.status === 'queued' ? 'Pause workflow' : 
                 'Only available when processing or paused'
               }
             >
@@ -980,9 +1034,9 @@ export default function SendInviteCanvas({ campaignName, campaignId }) {
             <button 
               className="btn btn-error btn-sm px-4 font-medium shadow-lg transition-all duration-200"
               onClick={handleCancelWorkflow}
-              disabled={!currentJobId || !['processing', 'paused'].includes(status?.status)}
+              disabled={!currentJobId || !status || !['processing', 'paused', 'queued'].includes(status?.status)}
               title={
-                (currentJobId && ['processing', 'paused'].includes(status?.status))
+                (currentJobId && status && ['processing', 'paused', 'queued'].includes(status?.status))
                   ? 'Permanently cancel workflow' 
                   : 'No active workflow to cancel'
               }

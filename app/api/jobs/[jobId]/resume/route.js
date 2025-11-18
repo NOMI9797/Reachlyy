@@ -5,6 +5,8 @@ import { db } from '@/libs/db';
 import { workflowJobs, campaigns } from '@/libs/schema';
 import { eq, and, inArray } from 'drizzle-orm';
 import { spawn } from 'child_process';
+import getRedisClient from '@/libs/redis';
+
 
 /**
  * POST /api/jobs/[jobId]/resume
@@ -69,15 +71,37 @@ export async function POST(request, { params }) {
       }, { status: 409 });
     }
 
+    console.log(`▶️  Resuming job: ${jobId.substring(0, 8)}... | Processed: ${job.processedLeads}/${job.totalLeads}`);
+
     // Update job status to queued (will be picked up by worker)
-    await db.update(workflowJobs)
+    const updatedJob = await db.update(workflowJobs)
       .set({
         status: 'queued',
         resumedAt: new Date()
       })
-      .where(eq(workflowJobs.id, jobId));
+      .where(eq(workflowJobs.id, jobId))
+      .returning();
 
-    console.log(`▶️  Resuming job: ${jobId.substring(0, 8)}... | Processed: ${job.processedLeads}/${job.totalLeads}`);
+    // Publish status update to Redis for SSE stream
+    try {
+      const redis = getRedisClient();
+      await redis.publish(
+        `job:${jobId}:status`,
+        JSON.stringify({
+          type: 'status',
+          jobId: updatedJob[0].id,
+          campaignId: job.campaignId,
+          status: 'queued',
+          progress: updatedJob[0].progress || 0,
+          totalLeads: updatedJob[0].totalLeads,
+          processedLeads: updatedJob[0].processedLeads || 0,
+          resumedAt: updatedJob[0].resumedAt,
+          timestamp: Date.now()
+        })
+      );
+    } catch (redisError) {
+      console.warn('⚠️  Redis publish failed:', redisError.message);
+    }
 
     // Spawn worker process
     const workerPath = 'workers/workflow-worker.js';
