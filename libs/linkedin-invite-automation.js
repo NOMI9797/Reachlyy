@@ -624,7 +624,7 @@ export async function processInvitesDirectly(context, page, leads, customMessage
     const lead = leads[i];
     
     // Helper function to send intermediate progress updates
-    const sendProgress = async (stage, progressFraction = 0) => {
+    const sendProgress = async (stage, progressFraction = 0, statusOverride = 'processing') => {
       if (progressCallback && typeof progressCallback === 'function') {
         try {
           await progressCallback({
@@ -634,7 +634,7 @@ export async function processInvitesDirectly(context, page, leads, customMessage
             leadName: lead.name,
             leadId: lead.id,
             stage: stage, // e.g., 'navigating', 'checking', 'clicking', 'sending'
-            status: 'processing'
+            status: statusOverride
           });
         } catch (cbError) {
           // Ignore callback errors to not break the flow
@@ -667,7 +667,7 @@ export async function processInvitesDirectly(context, page, leads, customMessage
           error: `Navigation failed: ${navError.message}` 
         });
         // Still send final progress for this lead
-        await sendProgress('failed', 1.0);
+        await sendProgress('failed', 1.0, 'failed');
         continue;
       }
       
@@ -688,7 +688,7 @@ export async function processInvitesDirectly(context, page, leads, customMessage
       const isAlreadyProcessed = await checkConnectionStatus(page, campaignId, lead, results);
       if (isAlreadyProcessed) {
         // Lead already processed, mark as complete
-        await sendProgress('already_processed', 1.0);
+        await sendProgress('already_processed', 1.0, 'already_processed');
         continue;
       }
       
@@ -726,7 +726,7 @@ export async function processInvitesDirectly(context, page, leads, customMessage
         }
         
         if (isPending) {
-          await sendProgress('already_pending', 1.0);
+        await sendProgress('already_pending', 1.0, 'already_pending');
           continue; // Move to next lead
         }
         
@@ -735,7 +735,7 @@ export async function processInvitesDirectly(context, page, leads, customMessage
         console.log(`📝 Marking as ACCEPTED`);
         results.alreadyConnected++;
         await updateLeadStatus(campaignId, lead.id, 'accepted', true);
-        await sendProgress('already_connected', 1.0);
+        await sendProgress('already_connected', 1.0, 'already_connected');
         continue;
       }
 
@@ -758,7 +758,7 @@ export async function processInvitesDirectly(context, page, leads, customMessage
           name: lead.name, 
           error: 'Failed to click Connect button' 
         });
-        await sendProgress('failed', 1.0);
+        await sendProgress('failed', 1.0, 'failed');
         continue;
       }
       
@@ -786,12 +786,12 @@ export async function processInvitesDirectly(context, page, leads, customMessage
         await updateLeadStatus(campaignId, lead.id, 'sent', true);
         console.log(`✅ INVITE SENT: ${lead.name || 'Lead'}`);
         // Stage 8: Invite sent successfully (100% of this lead)
-        await sendProgress('completed', 1.0);
+        await sendProgress('completed', 1.0, 'sent');
       } else {
         results.failed++;
         results.errors.push({ leadId: lead.id, name: lead.name, error: 'Failed to send invite via modal' });
         await updateLeadStatus(campaignId, lead.id, 'failed', false);
-        await sendProgress('failed', 1.0);
+        await sendProgress('failed', 1.0, 'failed');
       }
 
       // Rate limiting: 10-30 seconds randomized (human-like behavior to avoid detection)
@@ -807,7 +807,7 @@ export async function processInvitesDirectly(context, page, leads, customMessage
       results.failed++;
       results.errors.push({ leadId: lead.id, name: lead.name, error: error.message });
       await updateLeadStatus(campaignId, lead.id, 'failed', false);
-      await sendProgress('failed', 1.0);
+      await sendProgress('failed', 1.0, 'failed');
     }
     
     // ✅ Progress is now sent at each stage via sendProgress() helper
