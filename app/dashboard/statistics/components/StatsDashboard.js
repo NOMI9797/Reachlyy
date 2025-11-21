@@ -15,19 +15,19 @@ export default function StatsDashboard({ data, loading }) {
   if (loading) {
     return (
       <div className="space-y-6">
-        <div className="card bg-base-100 shadow-xl border border-base-300">
+        <div className="card bg-base-100 shadow-xl">
           <div className="card-body p-6">
             <div className="skeleton h-6 w-48 mb-4"></div>
             <SummaryCards stats={{}} loading={true} />
           </div>
         </div>
-        <div className="card bg-base-100 shadow-xl border border-base-300">
+        <div className="card bg-base-100 shadow-xl">
           <div className="card-body p-6">
             <div className="skeleton h-6 w-48 mb-4"></div>
             <StatsCharts stats={{}} byCampaign={[]} loading={true} />
           </div>
         </div>
-        <div className="card bg-base-100 shadow-xl border border-base-300">
+        <div className="card bg-base-100 shadow-xl">
           <div className="card-body p-6">
             <div className="skeleton h-6 w-48 mb-4"></div>
             <DetailedBreakdown byCampaign={[]} loading={true} />
@@ -51,9 +51,9 @@ export default function StatsDashboard({ data, loading }) {
   return (
     <div className="space-y-6">
       {/* Summary Cards Section */}
-      <div className="card bg-base-100 shadow-xl border border-base-300">
+      <div className="card bg-base-100 shadow-xl">
         <div className="card-body p-6">
-          <h2 className="card-title text-xl mb-4 pb-3 border-b border-base-300">
+          <h2 className="card-title text-xl mb-4">
             Overview Metrics
           </h2>
           <SummaryCards stats={data.global} loading={false} />
@@ -61,9 +61,9 @@ export default function StatsDashboard({ data, loading }) {
       </div>
       
       {/* Charts Section */}
-      <div className="card bg-base-100 shadow-xl border border-base-300">
+      <div className="card bg-base-100 shadow-xl">
         <div className="card-body p-6">
-          <h2 className="card-title text-xl mb-4 pb-3 border-b border-base-300">
+          <h2 className="card-title text-xl mb-4">
             Visual Analytics
           </h2>
           <StatsCharts 
@@ -75,9 +75,9 @@ export default function StatsDashboard({ data, loading }) {
       </div>
       
       {/* Detailed Breakdown Section */}
-      <div className="card bg-base-100 shadow-xl border border-base-300">
+      <div className="card bg-base-100 shadow-xl">
         <div className="card-body p-6">
-          <h2 className="card-title text-xl mb-4 pb-3 border-b border-base-300">
+          <h2 className="card-title text-xl mb-4">
             Campaign Details
           </h2>
           <DetailedBreakdown 

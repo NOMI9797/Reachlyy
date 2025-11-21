@@ -108,7 +108,7 @@ export default function DetailedBreakdown({ byCampaign, loading }) {
   
   if (loading) {
     return (
-      <div className="card bg-base-200 shadow-lg border border-base-300">
+      <div className="card bg-base-200 shadow-lg">
         <div className="card-body">
           <div className="skeleton h-6 w-48 mb-4"></div>
           <div className="skeleton h-64 w-full"></div>
@@ -119,7 +119,7 @@ export default function DetailedBreakdown({ byCampaign, loading }) {
   
   if (byCampaign.length === 0) {
     return (
-      <div className="card bg-base-200 shadow-lg border border-base-300">
+      <div className="card bg-base-200 shadow-lg">
         <div className="card-body">
           <h3 className="card-title text-lg mb-4 pb-2 border-b border-base-300">Campaign Breakdown</h3>
           <div className="flex items-center justify-center h-32 text-base-content/40">
@@ -131,9 +131,9 @@ export default function DetailedBreakdown({ byCampaign, loading }) {
   }
   
   return (
-    <div className="card bg-base-200 shadow-lg border border-base-300">
+    <div className="card bg-base-200 shadow-lg">
       <div className="card-body p-0">
-        <div className="p-6 pb-4 border-b border-base-300">
+        <div className="p-6 pb-2">
           <h3 className="card-title text-lg">Campaign Breakdown</h3>
         </div>
         <div className="p-6 pt-4">

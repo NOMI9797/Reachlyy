@@ -13,7 +13,7 @@ export default function SummaryCards({ stats, loading }) {
     return (
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
         {[...Array(5)].map((_, i) => (
-          <div key={i} className="card bg-base-100 shadow-xl">
+          <div key={i} className="card bg-base-100 shadow-md">
             <div className="card-body p-6">
               <div className="skeleton h-4 w-20 mb-2"></div>
               <div className="skeleton h-8 w-16"></div>
@@ -76,7 +76,7 @@ export default function SummaryCards({ stats, loading }) {
       {cards.map((card, index) => {
         const Icon = card.icon;
         return (
-          <div key={index} className="card bg-base-200 shadow-lg border border-base-300 hover:shadow-xl hover:border-primary/20 transition-all">
+          <div key={index} className="card bg-base-200 shadow-md hover:shadow-xl transition-all">
             <div className="card-body p-6">
               <div className="flex items-start justify-between mb-2">
                 <div className={`p-3 rounded-lg ${card.bgColor}`}>

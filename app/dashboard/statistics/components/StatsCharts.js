@@ -12,13 +12,13 @@ export default function StatsCharts({ stats, byCampaign, loading }) {
   if (loading) {
     return (
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 card bg-base-200 shadow-lg border border-base-300">
+        <div className="lg:col-span-2 card bg-base-200 shadow-lg">
           <div className="card-body">
             <div className="skeleton h-6 w-32 mb-4"></div>
             <div className="skeleton h-64 w-full"></div>
           </div>
         </div>
-        <div className="card bg-base-200 shadow-lg border border-base-300">
+        <div className="card bg-base-200 shadow-lg">
           <div className="card-body">
             <div className="skeleton h-6 w-32 mb-4"></div>
             <div className="skeleton h-64 w-full"></div>
@@ -120,9 +120,9 @@ export default function StatsCharts({ stats, byCampaign, loading }) {
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
       {/* Funnel Chart */}
-      <div className="lg:col-span-2 card bg-base-200 shadow-lg border border-base-300">
+      <div className="lg:col-span-2 card bg-base-200 shadow-lg">
         <div className="card-body">
-          <h3 className="card-title text-lg mb-4 pb-2 border-b border-base-300">Invite Conversion Funnel</h3>
+          <h3 className="card-title text-lg mb-4">Invite Conversion Funnel</h3>
           
           {stats.total === 0 ? (
             <div className="flex items-center justify-center h-64 text-base-content/40">
@@ -185,7 +185,7 @@ export default function StatsCharts({ stats, byCampaign, loading }) {
                       {/* Conversion arrow indicator */}
                       {!isLast && (
                         <div className="absolute -bottom-2 left-1/2 transform -translate-x-1/2">
-                          <div className="w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-base-300"></div>
+                          <div className="w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-base-200"></div>
                         </div>
                       )}
                     </div>
@@ -203,7 +203,7 @@ export default function StatsCharts({ stats, byCampaign, loading }) {
         {additionalMetrics.map((metric, index) => {
           const Icon = metric.icon;
           return (
-            <div key={index} className="card bg-base-200 shadow-lg border border-base-300 hover:shadow-xl transition-all">
+            <div key={index} className="card bg-base-200 shadow-lg hover:shadow-xl transition-all">
               <div className="card-body p-4">
                 <div className="flex items-start justify-between mb-2">
                   <div className={`p-2 rounded-lg ${metric.bgColor}`}>
