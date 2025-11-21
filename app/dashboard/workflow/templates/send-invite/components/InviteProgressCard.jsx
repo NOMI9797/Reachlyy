@@ -1,27 +1,36 @@
 import { getStageDescription } from "../constants/stageDescriptions";
 
-export default function InviteProgressCard({ progress, isProcessing }) {
-  const showProgress = isProcessing && progress.total > 0;
+export default function InviteProgressCard({ progress, isProcessing, preflightStage }) {
+  // Show progress bar if processing OR if we're in preflight stage
+  const showProgress = isProcessing || preflightStage;
 
   if (!showProgress) {
     return null;
   }
 
-  const label = progress.stage
-    ? getStageDescription(progress.stage)
-    : progress.current === 0 && progress.total === 1
-      ? "Connecting..."
-      : "Processing...";
+  const label = preflightStage
+    ? getStageDescription(preflightStage)
+    : progress.stage
+      ? getStageDescription(progress.stage)
+      : progress.current === 0 && progress.total === 1
+        ? "Connecting..."
+        : "Processing...";
 
   const percentage =
-    progress.current === 0 && progress.total === 1
+    preflightStage || (progress.current === 0 && progress.total === 1)
       ? "..."
-      : `${Math.ceil(progress.current)}/${progress.total} (${Math.round((progress.current / progress.total) * 100)}%)`;
+      : progress.total > 1
+        ? `${Math.ceil(progress.current)}/${progress.total} (${Math.round((progress.current / progress.total) * 100)}%)`
+        : "...";
 
   const width =
-    progress.current === 0 && progress.total === 1
-      ? "0%"
-      : `${(progress.current / progress.total) * 100}%`;
+    preflightStage
+      ? "15%" // Show 15% during preflight stages
+      : progress.current === 0 && progress.total === 1
+        ? "10%"
+        : progress.total > 1
+          ? `${Math.max(5, (progress.current / progress.total) * 100)}%`
+          : "10%";
 
   return (
     <div className="absolute top-4 right-4 z-[100] w-80">

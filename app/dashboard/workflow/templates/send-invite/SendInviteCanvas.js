@@ -113,8 +113,17 @@ export default function SendInviteCanvas({ campaignName, campaignId }) {
   const [progress, setProgress] = useState({ current: 0, total: 0, stage: null });
   const [isProcessing, setIsProcessing] = useState(false);
   
+  // Pre-flight stages (before SSE connects)
+  const [preflightStage, setPreflightStage] = useState(null);
+  
   // Stage descriptions for user-friendly display
   const stageDescriptions = {
+    'validating_campaign': 'Validating campaign...',
+    'finding_account': 'Finding LinkedIn account...',
+    'checking_existing': 'Checking for existing jobs...',
+    'creating_job': 'Creating workflow job...',
+    'spawning_worker': 'Starting background worker...',
+    'connecting_stream': 'Connecting to live updates...',
     'starting': 'Starting to process lead...',
     'navigating': 'Visiting profile...',
     'checking': 'Checking connection status...',
@@ -122,7 +131,11 @@ export default function SendInviteCanvas({ campaignName, campaignId }) {
     'clicking': 'Clicking Connect button...',
     'waiting_modal': 'Waiting for modal...',
     'sending': 'Sending invitation...',
-    'completed': 'Invite sent successfully!',
+    'completed': 'Invites processed!',
+    'completed_sent': 'Invites sent successfully!',
+    'completed_pending': 'Invites already pending',
+    'completed_connected': 'Already connected with this lead',
+    'completed_none': 'No invites needed',
     'already_processed': 'Lead already processed',
     'already_pending': 'Invite already pending',
     'already_connected': 'Already connected',
@@ -132,13 +145,38 @@ export default function SendInviteCanvas({ campaignName, campaignId }) {
   
   const getStageDescription = (stage) => {
     if (!stage) return 'Processing...';
-    return stageDescriptions[stage] || `Processing: ${stage}`;
+    const desc = stageDescriptions[stage] || `Processing: ${stage}`;
+    console.log(`📝 Stage description for "${stage}":`, desc);
+    return desc;
+  };
+  
+  const getCompletionStage = (results) => {
+    if (results?.skipped) return 'already_processed';
+    const sent = results?.sent || 0;
+    const alreadyPending = results?.alreadyPending || 0;
+    const alreadyConnected = results?.alreadyConnected || 0;
+    const failed = results?.failed || 0;
+    
+    if (sent > 0 && alreadyPending === 0 && alreadyConnected === 0 && failed === 0) {
+      return 'completed_sent';
+    }
+    if (alreadyPending > 0) {
+      return 'completed_pending';
+    }
+    if (alreadyConnected > 0) {
+      return 'completed_connected';
+    }
+    if (sent === 0) {
+      return 'completed_none';
+    }
+    return 'completed';
   };
   
   // Background mode state
   const [currentJobId, setCurrentJobId] = useState(null);
   const [status, setStatus] = useState(null);
   const eventSourceRef = useRef(null);
+  const completionTimeoutRef = useRef(null);
 
   const onInit = useCallback((instance) => {
     rf.current = instance;
@@ -170,20 +208,55 @@ export default function SendInviteCanvas({ campaignName, campaignId }) {
     localStorage.removeItem('currentJobId');
     localStorage.removeItem('currentCampaignId');
 
+    // ✅ Set states synchronously for immediate UI update
     setIsRunning(true);
     setActivationStatus(null);
-    setProgress({ current: 0, total: 0, stage: null });
+    setProgress({ current: 0, total: 1, stage: null });
     setIsProcessing(true);
+    setPreflightStage('validating_campaign'); // Set immediately for instant feedback
+    
+    console.log('🚀 Starting workflow - isProcessing:', true, 'preflightStage: validating_campaign');
 
     try {
-      // Start workflow (returns immediately)
-      const response = await fetch(`/api/campaigns/${campaignId}/start-workflow`, {
+      // ✅ OPTIMISTIC: Show progress during API call
+      const updatePreflightStage = (stage) => {
+        console.log(`📊 Preflight stage: ${stage}`);
+        setPreflightStage(stage);
+        setProgress(prev => ({ ...prev, stage }));
+      };
+
+      // Start workflow API call
+      // While the API processes, we'll show optimistic stages
+      const fetchPromise = fetch(`/api/campaigns/${campaignId}/start-workflow`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           customMessage: "Hi! I'd like to connect with you."
         })
       });
+
+      // Show optimistic stages while API call is in progress
+      // These stages represent what the API is doing internally
+      const stages = ['finding_account', 'checking_existing', 'creating_job', 'spawning_worker'];
+      let stageIndex = 0;
+      
+      const stageInterval = setInterval(() => {
+        if (stageIndex < stages.length) {
+          updatePreflightStage(stages[stageIndex]);
+          stageIndex++;
+        } else {
+          clearInterval(stageInterval);
+        }
+      }, 200); // Update every 200ms for smooth progression
+
+      // Wait for API response
+      const response = await fetchPromise;
+      
+      // Clear interval once we get response
+      clearInterval(stageInterval);
+      
+      // Show final preflight stage
+      updatePreflightStage('spawning_worker');
 
       if (!response.ok) {
         const errorData = await response.json();
@@ -231,6 +304,10 @@ export default function SendInviteCanvas({ campaignName, campaignId }) {
       }
 
       const { jobId, message, campaignName: cName } = await response.json();
+      
+      // Step 6: Connecting to stream
+      updatePreflightStage('connecting_stream');
+      
       setCurrentJobId(jobId);
       
       // Save to localStorage so we can resume if user navigates away
@@ -245,6 +322,7 @@ export default function SendInviteCanvas({ campaignName, campaignId }) {
 
       console.log(`✅ Workflow started: Job ${jobId}`);
 
+      // Clear preflight stage once SSE connects (handled in SSE useEffect)
       // SSE will automatically connect when currentJobId is set
 
     } catch (error) {
@@ -256,6 +334,7 @@ export default function SendInviteCanvas({ campaignName, campaignId }) {
       });
       setIsRunning(false);
       setIsProcessing(false);
+      setPreflightStage(null);
     }
   };
 
@@ -286,32 +365,35 @@ export default function SendInviteCanvas({ campaignName, campaignId }) {
         
         if (data.type === 'connected') {
           console.log('✅ SSE connected to job stream');
+          // Clear preflight stage once SSE is connected
+          setPreflightStage(null);
           return;
         }
 
         if (data.type === 'status') {
-          // Use fractionalProgress for smooth progress bar, fallback to currentLead or processedLeads
-          const currentProgress = data.fractionalProgress !== undefined 
-            ? data.fractionalProgress 
-            : (data.currentLead || data.processedLeads || 0);
-          const stageInfo = data.stage ? ` (${data.stage})` : '';
+          // ✅ Clear preflight stage once we receive real SSE data
+          setPreflightStage(null);
           
-          console.log(`📊 Job status update: ${data.status} - ${Math.ceil(currentProgress)}/${data.totalLeads} (${data.progress}%)${stageInfo}`);
-          
-          // Update status
-          setStatus(data);
-          
-          // Update progress with fractional progress and current stage for smoother bar movement
-          setProgress({ 
-            current: currentProgress, 
-            total: data.totalLeads || 0,
-            stage: data.stage || null
-          });
-          
-          // Handle different job statuses
+          // Handle completion first to ensure 100% progress
           if (data.status === 'completed') {
+            // ✅ Ensure progress reaches 100% - use totalLeads for both current and total
+            const totalLeads = data.totalLeads || data.processedLeads || progress.total || 1;
+            const finalProgress = totalLeads; // Always 100% when completed
+            const completionStage = getCompletionStage(data.results);
+            
+            console.log(`✅ Workflow completed: ${finalProgress}/${totalLeads} (100%)`);
+            
+            // Update progress to 100%
+            setProgress({ 
+              current: finalProgress, 
+              total: totalLeads,
+              stage: completionStage
+            });
+            
+            // Update status
+            setStatus(data);
+            
             setIsRunning(false);
-            setIsProcessing(false);
             
             // Check if it was skipped
             if (data.results?.skipped) {
@@ -334,7 +416,42 @@ export default function SendInviteCanvas({ campaignName, campaignId }) {
             localStorage.removeItem('currentJobId');
             localStorage.removeItem('currentCampaignId');
             
-          } else if (data.status === 'paused') {
+            // ✅ Keep progress bar visible for 2 seconds then reset UI
+            if (completionTimeoutRef.current) {
+              clearTimeout(completionTimeoutRef.current);
+            }
+            completionTimeoutRef.current = setTimeout(() => {
+              setIsProcessing(false);
+              setProgress({ current: 0, total: 0, stage: null });
+              setStatus(null);
+              setCurrentJobId(null);
+              setActivationStatus(null);
+            }, 2000);
+            
+            return; // Exit early for completed status
+          }
+          
+          // For non-completed statuses, use normal progress calculation
+          // Use fractionalProgress for smooth progress bar, fallback to currentLead or processedLeads
+          const currentProgress = data.fractionalProgress !== undefined 
+            ? data.fractionalProgress 
+            : (data.currentLead || data.processedLeads || 0);
+          const stageInfo = data.stage ? ` (${data.stage})` : '';
+          
+          console.log(`📊 Job status update: ${data.status} - ${Math.ceil(currentProgress)}/${data.totalLeads} (${data.progress}%)${stageInfo}`);
+          
+          // Update status
+          setStatus(data);
+          
+          // Update progress with fractional progress and current stage for smoother bar movement
+          setProgress({ 
+            current: currentProgress, 
+            total: data.totalLeads || 0,
+            stage: data.stage || null
+          });
+          
+          // Handle different job statuses (non-completed)
+          if (data.status === 'paused') {
             setIsRunning(false);
             setIsProcessing(false);
             
@@ -415,6 +532,10 @@ export default function SendInviteCanvas({ campaignName, campaignId }) {
         console.log('🧹 Closing SSE connection');
         eventSourceRef.current.close();
         eventSourceRef.current = null;
+      }
+      if (completionTimeoutRef.current) {
+        clearTimeout(completionTimeoutRef.current);
+        completionTimeoutRef.current = null;
       }
     };
   }, [currentJobId]);
@@ -923,18 +1044,25 @@ export default function SendInviteCanvas({ campaignName, campaignId }) {
           <Background variant="dots" gap={18} size={1} color={isDark ? "#6b7280" : "#cbd5e1"} />
         </ReactFlow>
         {/* Progress Bar - Compact Top-Right */}
-        {isProcessing && progress.total > 0 && (
+        {(isProcessing || preflightStage) && (
           <div className="absolute top-4 right-4 z-[100] w-80">
             <div className="bg-base-100 rounded-lg shadow-xl border border-base-300 p-3">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs font-medium text-base-content flex items-center gap-1.5">
                   <span className="loading loading-spinner loading-xs text-primary"></span>
-                  {progress.stage ? getStageDescription(progress.stage) : (progress.current === 0 && progress.total === 1 ? 'Connecting...' : 'Processing...')}
+                  {preflightStage 
+                    ? getStageDescription(preflightStage)
+                    : progress.stage 
+                      ? getStageDescription(progress.stage) 
+                      : (progress.current === 0 && progress.total === 1 ? 'Connecting...' : 'Processing...')
+                  }
                 </span>
                 <span className="text-xs font-mono font-semibold text-primary">
-                  {progress.current === 0 && progress.total === 1 
+                  {preflightStage || (progress.total === 0)
                     ? '...' 
-                    : `${Math.ceil(progress.current)}/${progress.total} (${Math.round((progress.current / progress.total) * 100)}%)`
+                    : progress.total > 0
+                      ? `${Math.ceil(progress.current)}/${progress.total} (${Math.round((progress.current / progress.total) * 100)}%)`
+                      : '...'
                   }
                 </span>
               </div>
@@ -944,9 +1072,11 @@ export default function SendInviteCanvas({ campaignName, campaignId }) {
                 <div 
                   className="bg-gradient-to-r from-primary to-secondary h-full rounded-full transition-all duration-300 ease-out"
                   style={{ 
-                    width: progress.current === 0 && progress.total === 1 
-                      ? '0%' 
-                      : `${(progress.current / progress.total) * 100}%` 
+                    width: preflightStage
+                      ? '15%' // Show 15% during preflight stages
+                      : progress.total > 0
+                        ? `${Math.min(100, Math.max(5, (progress.current / progress.total) * 100))}%`
+                        : '10%'
                   }}
                 />
               </div>

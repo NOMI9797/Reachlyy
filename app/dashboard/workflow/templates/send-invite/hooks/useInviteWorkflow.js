@@ -8,6 +8,7 @@ export default function useInviteWorkflow({ campaignId }) {
   const [activationStatus, setActivationStatus] = useState(null);
   const [progress, setProgress] = useState(initialProgress);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [preflightStage, setPreflightStage] = useState(null);
   const [currentJobId, setCurrentJobId] = useState(null);
   const [status, setStatus] = useState(null);
   const eventSourceRef = useRef(null);
@@ -28,17 +29,53 @@ export default function useInviteWorkflow({ campaignId }) {
 
     setIsRunning(true);
     setActivationStatus(null);
-    setProgress(initialProgress);
+    setProgress({ current: 0, total: 1, stage: null });
     setIsProcessing(true);
+    
+    // ✅ Set preflight stage immediately for instant feedback
+    setPreflightStage('validating_campaign');
+    console.log('🚀 Starting workflow - setting preflight stage');
 
     try {
-      const response = await fetch(`/api/campaigns/${campaignId}/start-workflow`, {
+      // ✅ OPTIMISTIC: Show progress during API call
+      const updatePreflightStage = (stage) => {
+        console.log(`📊 Preflight stage: ${stage}`);
+        setPreflightStage(stage);
+        setProgress(prev => ({ ...prev, stage }));
+      };
+
+      // Start workflow API call
+      // While the API processes, we'll show optimistic stages
+      const fetchPromise = fetch(`/api/campaigns/${campaignId}/start-workflow`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           customMessage: "Hi! I'd like to connect with you.",
         }),
       });
+
+      // Show optimistic stages while API call is in progress
+      // These stages represent what the API is doing internally
+      const stages = ['finding_account', 'checking_existing', 'creating_job', 'spawning_worker'];
+      let stageIndex = 0;
+      
+      const stageInterval = setInterval(() => {
+        if (stageIndex < stages.length) {
+          updatePreflightStage(stages[stageIndex]);
+          stageIndex++;
+        } else {
+          clearInterval(stageInterval);
+        }
+      }, 200); // Update every 200ms for smooth progression
+
+      // Wait for API response
+      const response = await fetchPromise;
+      
+      // Clear interval once we get response
+      clearInterval(stageInterval);
+      
+      // Show final preflight stage
+      updatePreflightStage('spawning_worker');
 
       if (!response.ok) {
         const errorData = await response.json();
@@ -75,6 +112,10 @@ export default function useInviteWorkflow({ campaignId }) {
       }
 
       const { jobId, message } = await response.json();
+      
+      // Step 6: Connecting to stream
+      updatePreflightStage('connecting_stream');
+      
       setCurrentJobId(jobId);
       localStorage.setItem("currentJobId", jobId);
       localStorage.setItem("currentCampaignId", campaignId);
@@ -93,6 +134,7 @@ export default function useInviteWorkflow({ campaignId }) {
       });
       setIsRunning(false);
       setIsProcessing(false);
+      setPreflightStage(null);
     }
   }, [campaignId]);
 
@@ -299,8 +341,15 @@ export default function useInviteWorkflow({ campaignId }) {
     eventSource.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
-        if (data.type === "connected") return;
+        if (data.type === "connected") {
+          // ✅ Clear preflight stage once SSE is connected
+          setPreflightStage(null);
+          return;
+        }
         if (data.type !== "status") return;
+
+        // ✅ Clear preflight stage once we receive real SSE data
+        setPreflightStage(null);
 
         const currentProgress =
           data.fractionalProgress !== undefined
@@ -438,6 +487,7 @@ export default function useInviteWorkflow({ campaignId }) {
       activationStatus,
       progress,
       isProcessing,
+      preflightStage,
       status,
       currentJobId,
     },

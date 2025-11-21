@@ -122,10 +122,16 @@ async function publishProgress(jobId, data) {
   
   try {
     const channel = `job:${jobId}:status`;
-    await redisPublisher.publish(channel, JSON.stringify({
+    const payload = {
       ...data,
       timestamp: Date.now()
-    }));
+    };
+    await redisPublisher.publish(channel, JSON.stringify(payload));
+
+    const snapshotKey = `job:${jobId}:status:last`;
+    await redisPublisher.set(snapshotKey, JSON.stringify(payload), {
+      EX: 600 // cache last status for 10 minutes
+    });
   } catch (error) {
     console.warn('⚠️  Failed to publish progress to Redis:', error.message);
     // Don't fail the workflow if Redis publish fails
@@ -251,6 +257,17 @@ async function runJob() {
     if (eligibleLeads.length === 0) {
       console.log(`ℹ️  No action needed - all leads already processed`);
       
+      const skippedResults = {
+        total: 0,
+        sent: 0,
+        alreadyConnected: 0,
+        alreadyPending: 0,
+        failed: 0,
+        skipped: true,
+        skipReason: 'all_leads_already_processed',
+        message: '✅ All leads in this campaign already have pending or accepted invites.'
+      };
+      
       // Mark job as completed (not failed) - this is a successful no-op
       await db.update(workflowJobs)
         .set({
@@ -259,18 +276,25 @@ async function runJob() {
           totalLeads: 0,
           processedLeads: 0,
           progress: 100,
-          results: {
-            total: 0,
-            sent: 0,
-            alreadyConnected: 0,
-            alreadyPending: 0,
-            failed: 0,
-            skipped: true,
-            skipReason: 'all_leads_already_processed',
-            message: '✅ All leads in this campaign already have pending or accepted invites.'
-          }
+          results: skippedResults
         })
         .where(eq(workflowJobs.id, jobId));
+      
+      // Publish completion to Redis so SSE clients can finish gracefully
+      await publishProgress(jobId, {
+        type: 'status',
+        jobId,
+        campaignId: job.campaignId,
+        status: 'completed',
+        stage: 'completed',
+        progress: 100,
+        totalLeads: 0,
+        processedLeads: 0,
+        results: skippedResults,
+        completedAt: new Date().toISOString()
+      });
+      
+      await cleanupRedisPublisher();
       
       console.log(`✅ Job Completed (skipped) | Exit: 0`);
       process.exit(0);

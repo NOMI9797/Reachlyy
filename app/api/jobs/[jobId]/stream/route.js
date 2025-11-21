@@ -22,12 +22,22 @@ export const GET = withAuth(async (request, { params, user }) => {
       return NextResponse.json({ error: "Job ID is required" }, { status: 400 });
     }
 
+    const jobRecord = await db.query.workflowJobs.findFirst({
+      where: and(eq(workflowJobs.id, jobId), eq(workflowJobs.userId, user.id)),
+    });
+
+    if (!jobRecord) {
+      return NextResponse.json({ error: "Job not found" }, { status: 404 });
+    }
+
     const encoder = new TextEncoder();
+    const redisUrl = process.env.REDIS_URL || "redis://localhost:6379";
     
     // SSE stream for real-time progress
     const stream = new ReadableStream({
       async start(controller) {
         let redisSubscriber = null;
+        let redisSnapshotClient = null;
         let pollInterval = null;
         let heartbeatInterval = null;
         let useRedis = false;
@@ -51,10 +61,39 @@ export const GET = withAuth(async (request, { params, user }) => {
         // Send initial connection event
         sendEvent({ type: 'connected', jobId });
 
+        // Attempt to load last known snapshot for instant UI updates
+        try {
+          redisSnapshotClient = createClient({ url: redisUrl });
+          redisSnapshotClient.on("error", (err) => {
+            console.warn("⚠️  Redis Snapshot Client Error:", err.message);
+          });
+          await redisSnapshotClient.connect();
+          const snapshotKey = `job:${jobId}:status:last`;
+          const cachedSnapshot = await redisSnapshotClient.get(snapshotKey);
+          if (cachedSnapshot) {
+            const parsedSnapshot = JSON.parse(cachedSnapshot);
+            if (!isClosed) {
+              sendEvent({
+                type: "status",
+                ...parsedSnapshot,
+              });
+              if (["completed", "failed", "cancelled", "timeout"].includes(parsedSnapshot.status)) {
+                sendEvent({
+                  type: "complete",
+                  status: parsedSnapshot.status,
+                  finalProgress: parsedSnapshot.progress || 0,
+                });
+              }
+            }
+          }
+        } catch (snapshotError) {
+          console.warn("⚠️  Failed to load job snapshot:", snapshotError.message);
+        }
+
         // ✅ REDIS-FIRST: Try to subscribe to Redis Pub/Sub
         try {
           redisSubscriber = createClient({
-            url: process.env.REDIS_URL || 'redis://localhost:6379'
+            url: redisUrl
           });
 
           redisSubscriber.on('error', (err) => {
@@ -207,6 +246,10 @@ export const GET = withAuth(async (request, { params, user }) => {
           if (heartbeatInterval) {
             clearInterval(heartbeatInterval);
             heartbeatInterval = null;
+          }
+          if (redisSnapshotClient) {
+            redisSnapshotClient.quit().catch(() => {});
+            redisSnapshotClient = null;
           }
           if (redisSubscriber) {
             redisSubscriber.quit().catch(() => {});
