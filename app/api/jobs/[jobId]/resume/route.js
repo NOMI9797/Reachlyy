@@ -85,19 +85,25 @@ export async function POST(request, { params }) {
     // Publish status update to Redis for SSE stream
     try {
       const redis = getRedisClient();
+      const statusPayload = {
+        type: 'status',
+        jobId: updatedJob[0].id,
+        campaignId: job.campaignId,
+        status: 'queued',
+        progress: updatedJob[0].progress || 0,
+        totalLeads: updatedJob[0].totalLeads,
+        processedLeads: updatedJob[0].processedLeads || 0,
+        resumedAt: updatedJob[0].resumedAt,
+        timestamp: Date.now()
+      };
       await redis.publish(
         `job:${jobId}:status`,
-        JSON.stringify({
-          type: 'status',
-          jobId: updatedJob[0].id,
-          campaignId: job.campaignId,
-          status: 'queued',
-          progress: updatedJob[0].progress || 0,
-          totalLeads: updatedJob[0].totalLeads,
-          processedLeads: updatedJob[0].processedLeads || 0,
-          resumedAt: updatedJob[0].resumedAt,
-          timestamp: Date.now()
-        })
+        JSON.stringify(statusPayload)
+      );
+      await redis.setex(
+        `job:${jobId}:status:last`,
+        600,
+        JSON.stringify(statusPayload)
       );
     } catch (redisError) {
       console.warn('⚠️  Redis publish failed:', redisError.message);

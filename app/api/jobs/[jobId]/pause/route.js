@@ -61,6 +61,18 @@ export async function POST(request, { params }) {
     // Publish to Redis for instant worker notification and SSE updates
     try {
       const redis = getRedisClient();
+      const statusPayload = {
+        type: 'status',
+        jobId: updatedJob[0].id,
+        campaignId: job.campaignId,
+        status: 'paused',
+        progress: updatedJob[0].progress || 0,
+        totalLeads: updatedJob[0].totalLeads,
+        processedLeads: updatedJob[0].processedLeads || 0,
+        pausedAt: updatedJob[0].pausedAt,
+        pauseCount: updatedJob[0].pauseCount,
+        timestamp: Date.now()
+      };
       
       // Publish control signal for worker
       await redis.publish(
@@ -76,18 +88,14 @@ export async function POST(request, { params }) {
       // Publish status update for SSE stream
       await redis.publish(
         `job:${jobId}:status`,
-        JSON.stringify({
-          type: 'status',
-          jobId: updatedJob[0].id,
-          campaignId: job.campaignId,
-          status: 'paused',
-          progress: updatedJob[0].progress || 0,
-          totalLeads: updatedJob[0].totalLeads,
-          processedLeads: updatedJob[0].processedLeads || 0,
-          pausedAt: updatedJob[0].pausedAt,
-          pauseCount: updatedJob[0].pauseCount,
-          timestamp: Date.now()
-        })
+        JSON.stringify(statusPayload)
+      );
+      
+      // Persist snapshot for reconnects
+      await redis.setex(
+        `job:${jobId}:status:last`,
+        600,
+        JSON.stringify(statusPayload)
       );
       
       console.log(`📢 Published PAUSE signal to Redis | Job: ${jobId.substring(0, 8)}... | Count: ${updatedJob[0].pauseCount}`);

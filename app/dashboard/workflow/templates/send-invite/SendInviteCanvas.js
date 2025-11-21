@@ -374,6 +374,11 @@ export default function SendInviteCanvas({ campaignName, campaignId }) {
           // ✅ Clear preflight stage once we receive real SSE data
           setPreflightStage(null);
           
+          if (completionTimeoutRef.current && data.status !== 'completed') {
+            clearTimeout(completionTimeoutRef.current);
+            completionTimeoutRef.current = null;
+          }
+          
           // Handle completion first to ensure 100% progress
           if (data.status === 'completed') {
             // ✅ Ensure progress reaches 100% - use totalLeads for both current and total
@@ -454,6 +459,11 @@ export default function SendInviteCanvas({ campaignName, campaignId }) {
           if (data.status === 'paused') {
             setIsRunning(false);
             setIsProcessing(false);
+            setProgress({
+              current: 0,
+              total: data.totalLeads || 0,
+              stage: null
+            });
             
             setActivationStatus({
               type: 'info',
@@ -1045,38 +1055,61 @@ export default function SendInviteCanvas({ campaignName, campaignId }) {
         </ReactFlow>
         {/* Progress Bar - Compact Top-Right */}
         {(isProcessing || preflightStage) && (
-          <div className="absolute top-4 right-4 z-[100] w-80">
-            <div className="bg-base-100 rounded-lg shadow-xl border border-base-300 p-3">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-medium text-base-content flex items-center gap-1.5">
-                  <span className="loading loading-spinner loading-xs text-primary"></span>
-                  {preflightStage 
-                    ? getStageDescription(preflightStage)
-                    : progress.stage 
-                      ? getStageDescription(progress.stage) 
-                      : (progress.current === 0 && progress.total === 1 ? 'Connecting...' : 'Processing...')
-                  }
+          <div className="absolute top-4 right-4 z-[120] w-[22rem] max-w-full">
+            <div
+              className={`rounded-2xl shadow-2xl backdrop-blur-xl border px-4 py-3 ${
+                isDark
+                  ? 'bg-slate-900/85 border-white/10 text-slate-100'
+                  : 'bg-white/90 border-slate-200 text-slate-800'
+              }`}
+            >
+              <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.2em] font-semibold opacity-70 mb-2">
+                <span className="flex items-center gap-2">
+                  <span className="h-2 w-2 rounded-full bg-gradient-to-r from-primary to-secondary animate-pulse" />
+                  {preflightStage ? 'Initializing workflow' : 'Background workflow'}
                 </span>
-                <span className="text-xs font-mono font-semibold text-primary">
-                  {preflightStage || (progress.total === 0)
-                    ? '...' 
-                    : progress.total > 0
-                      ? `${Math.ceil(progress.current)}/${progress.total} (${Math.round((progress.current / progress.total) * 100)}%)`
-                      : '...'
-                  }
+                <span>
+                  {preflightStage || progress.total === 0
+                    ? '...'
+                    : `${Math.min(100, Math.round((progress.current / progress.total) * 100))}%`}
                 </span>
               </div>
-              
-              {/* Progress Bar */}
-              <div className="w-full bg-base-300 rounded-full h-2 overflow-hidden">
-                <div 
-                  className="bg-gradient-to-r from-primary to-secondary h-full rounded-full transition-all duration-300 ease-out"
-                  style={{ 
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex flex-col">
+                  <span className="text-sm font-semibold">
+                    {preflightStage
+                      ? getStageDescription(preflightStage)
+                      : progress.stage
+                        ? getStageDescription(progress.stage)
+                        : progress.current === 0 && progress.total === 1
+                          ? 'Connecting...'
+                          : 'Processing...'}
+                  </span>
+                  {!preflightStage && progress.total > 0 && (
+                    <span className="text-xs font-mono opacity-70">
+                      {Math.ceil(progress.current)}/{progress.total} leads
+                    </span>
+                  )}
+                </div>
+                <span className="text-xs font-semibold">
+                  {status?.status === 'paused'
+                    ? 'Paused'
+                    : preflightStage
+                      ? 'Preparing'
+                      : status?.status === 'processing'
+                        ? 'In progress'
+                        : 'Working'}
+                </span>
+              </div>
+              <div className="w-full h-3 rounded-full overflow-hidden bg-gradient-to-r from-slate-200/40 via-slate-300/50 to-slate-200/40 dark:from-white/10 dark:via-white/15 dark:to-white/10 border border-white/10">
+                <div
+                  className="h-full rounded-full bg-gradient-to-r from-primary via-secondary to-accent transition-all duration-500 ease-out shadow-[0_0_15px_rgba(248,121,65,0.35)]"
+                  style={{
                     width: preflightStage
-                      ? '15%' // Show 15% during preflight stages
+                      ? '18%'
                       : progress.total > 0
                         ? `${Math.min(100, Math.max(5, (progress.current / progress.total) * 100))}%`
-                        : '10%'
+                        : '12%',
                   }}
                 />
               </div>
